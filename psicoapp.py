@@ -2,6 +2,17 @@ import streamlit as st
 import pandas as pd
 from database import supabase # Importa a conexão que configuramos anteriormente
 
+def buscar_pacientes():
+    try:
+        res = supabase.table("pacientes").select("nome").execute()
+        return sorted([p['nome'] for p in res.data]) if res.data else []
+    except Exception as e:
+        # Isso vai imprimir o erro real do Supabase na tela do seu app
+        st.error(f"Erro detalhado do Supabase: {e}")
+        return []
+
+
+
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="PsicoApp - Gestão Clínica")
 
