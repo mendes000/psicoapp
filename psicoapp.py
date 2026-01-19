@@ -1,77 +1,86 @@
-import pandas as pd
-from pathlib import Path
 import streamlit as st
+import pandas as pd
+from database import supabase # Importa a conexão que configuramos anteriormente
 
-# --- FUNÇÃO PARA LIMPAR CACHE ---
-def resetar_cache():
-    st.cache_data.clear()
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(layout="wide", page_title="PsicoApp - Gestão Clínica")
 
-# Configuração da página
-st.set_page_config(layout="wide", page_title="IA Psi - Prontuário")
+# --- FUNÇÕES DE BUSCA (SUPABASE) ---
+@st.cache_data(ttl=60) # Cache de 1 minuto para garantir dados frescos
+def buscar_pacientes():
+    res = supabase.table("pacientes").select("nome").execute()
+    return sorted([p['nome'] for p in res.data]) if res.data else []
 
-# --- CARREGAMENTO COM CACHE ---
-@st.cache_data
-def carregar_entradas():
-    caminho = Path.cwd() / 'entradas.parquet'
-    try:
-        df = pd.read_parquet(caminho)
-        # Garante a existência da coluna de anotações
-        if 'anotacoes_clinicas' not in df.columns:
-            df['anotacoes_clinicas'] = None
-        return df
-    except Exception as e:
-        return pd.DataFrame()
+def carregar_dados_paciente(nome_paciente):
+    # Busca todas as sessões do paciente selecionado
+    res = supabase.table("entradas")\
+        .select("*")\
+        .eq("nome", nome_paciente)\
+        .order("data", desc=True)\
+        .execute()
+    return pd.DataFrame(res.data) if res.data else pd.DataFrame()
 
-# Carrega os dados iniciais
-df_entradas = carregar_entradas()
+# --- INTERFACE PRINCIPAL ---
+st.title("🧠 PsicoApp: Painel do Terapeuta")
 
-if not df_entradas.empty:
-    # --- SELECTBOX COM GATILHO DE ATUALIZAÇÃO ---
-    # O on_change=resetar_cache faz o app reler o arquivo toda vez que você troca o paciente
-    lista_pacientes = sorted(df_entradas['nome'].unique())
-    paciente = st.sidebar.selectbox(
-        '👤 Selecionar Paciente:', 
-        lista_pacientes,
-        on_change=resetar_cache
+# Sidebar para seleção
+nomes_pacientes = buscar_pacientes()
+
+if nomes_pacientes:
+    paciente_selecionado = st.sidebar.selectbox(
+        "🔎 Selecionar Paciente:", 
+        nomes_pacientes,
+        on_change=lambda: st.cache_data.clear() # Limpa cache ao trocar paciente
     )
 
-    # Filtragem após o possível reset de cache
-    df_p = df_entradas[df_entradas['nome'] == paciente].sort_values(by='data', ascending=False)
+    df_p = carregar_dados_paciente(paciente_selecionado)
 
-    st.title(f"Prontuário Digital: {paciente}")
+    if not df_p.empty:
+        # --- MÉTRICAS FINANCEIRAS ---
+        # Convertendo para float para garantir cálculos precisos
+        v_total = df_p['valor_sessao'].astype(float).sum()
+        p_total = df_p['valor_pago'].astype(float).sum()
+        saldo = p_total - v_total
 
-    # --- MÉTRICAS ---
-    col1, col2, col3 = st.columns(3)
-    valor_total = df_p['valor_sessao'].sum()
-    pago_total = df_p['valor_pago'].sum()
-    saldo = pago_total - valor_total
-    
-    col1.metric("Total de Sessões", len(df_p))
-    col2.metric("Valor Total Pago", f"R$ {pago_total:,.2f}")
-    col3.metric("Saldo", f"R$ {saldo:,.2f}", delta=f"{saldo:,.2f}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Sessões Registadas", len(df_p))
+        col2.metric("Total Pago", f"R$ {p_total:,.2f}")
+        col3.metric("Saldo do Paciente", f"R$ {saldo:,.2f}", 
+                    delta=f"{saldo:,.2f}", delta_color="normal" if saldo >= 0 else "inverse")
 
-    st.divider()
+        st.divider()
 
-    # --- HISTÓRICO DE ANOTAÇÕES (EVOLUÇÃO) ---
-    st.subheader("📋 Evolução e Anotações Clínicas")
-    
-    with st.expander("🔍 Visualizar Histórico de Evolução", expanded=True):
-        # Filtro para mostrar apenas quem tem anotação
-        df_notas = df_p[df_p['anotacoes_clinicas'].notna() & (df_p['anotacoes_clinicas'] != "")]
+        # --- EVOLUÇÃO CLÍNICA ---
+        st.subheader("📋 Histórico de Evolução")
         
-        if not df_notas.empty:
-            for _, row in df_notas.iterrows():
-                st.markdown(f"**🗓️ Sessão: {row['data'].strftime('%d/%m/%Y')}**")
-                st.info(row['anotacoes_clinicas'])
-                if row['obs']:
-                    st.caption(f"*Obs: {row['obs']}*")
-                st.divider()
-        else:
-            st.warning("Nenhuma anotação clínica para este paciente.")
+        with st.expander("🔍 Visualizar Anotações e Notas de Sessão", expanded=True):
+            # Filtra apenas registros que tenham anotações preenchidas
+            notas = df_p[df_p['anotacoes_clinicas'].notna() & (df_p['anotacoes_clinicas'] != "")]
+            
+            if not notas.empty:
+                for _, row in notas.iterrows():
+                    data_formatada = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
+                    st.markdown(f"**🗓️ {data_formatada}** — *{row['tipo']}*")
+                    st.info(row['anotacoes_clinicas'])
+                    if row['obs']:
+                        st.caption(f"📌 Observação: {row['obs']}")
+                    st.divider()
+            else:
+                st.warning("Nenhuma anotação clínica encontrada para este paciente.")
 
-    # --- TABELA DE DADOS ---
-    st.subheader("📑 Detalhamento")
-    st.dataframe(df_p[['data', 'tipo', 'valor_sessao', 'valor_pago', 'faltas', 'obs']], use_container_width=True)
+        # --- TABELA DE LANÇAMENTOS ---
+        st.subheader("📑 Detalhamento de Sessões")
+        st.dataframe(
+            df_p[['data', 'tipo', 'valor_sessao', 'valor_pago', 'faltas', 'obs']], 
+            use_container_width=True
+        )
 
+    else:
+        st.info(f"O paciente {paciente_selecionado} ainda não possui sessões registadas.")
 else:
-    st.error("Arquivo não encontrado. Cadastre um atendimento primeiro.")
+    st.warning("Nenhum paciente encontrado na base de dados. Vá à página de Cadastro.")
+
+# Botão de atualização manual na sidebar
+if st.sidebar.button("🔄 Atualizar Base de Dados"):
+    st.cache_data.clear()
+    st.rerun()
