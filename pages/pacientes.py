@@ -5,13 +5,19 @@ from database import supabase # Supondo que centralizou a conexão
 st.set_page_config(layout="wide", page_title="Cadastro de Pacientes")
 
 def carregar_origens():
-    # Busca origens únicas já cadastradas no Supabase
-    res = supabase.table("pacientes").select("origem").execute()
-    if res.data:
-        df = pd.DataFrame(res.data)
-        origens = df['origem'].unique().tolist()
-        return sorted([o for o in origens if o])
-    return ["Particular", "Indicação", "Instagram"]
+    try:
+        res = supabase.table("pacientes").select("origem").execute()
+        # Se houver dados, processa. Se não houver, retorna lista padrão.
+        if res.data and len(res.data) > 0:
+            df = pd.DataFrame(res.data)
+            if 'origem' in df.columns:
+                origens = df['origem'].dropna().unique().tolist()
+                return sorted([str(o) for o in origens if o])
+        return ["Particular", "Indicação", "Instagram", "Google Ads"]
+    except Exception as e:
+        # Exibe o erro real na tela para você saber se é "tabela não encontrada" ou "permissão"
+        st.error(f"Erro de Conexão: {e}")
+        return ["Particular", "Indicação"]
 
 st.title("👤 Cadastro de Paciente (Nuvem)")
 
