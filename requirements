@@ -2,3 +2,4 @@ pandas
 supabase
 st-gsheets-connection
 postgrest
+pyarrow
