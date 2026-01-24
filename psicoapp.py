@@ -36,14 +36,46 @@ if nomes_pacientes:
     df_p = carregar_dados_paciente(paciente_selecionado)
 
     if not df_p.empty:
+        df_p = df_p.copy()
+        df_p["data"] = pd.to_datetime(df_p["data"], errors="coerce")
+        df_p["valor_sessao"] = pd.to_numeric(df_p.get("valor_sessao"), errors="coerce").fillna(0)
+        df_p["valor_pago"] = pd.to_numeric(df_p.get("valor_pago"), errors="coerce").fillna(0)
+        df_p["faltas"] = df_p.get("faltas", False)
+        df_p["obs"] = df_p.get("obs", "")
+
+        st.sidebar.markdown("### Filtros")
+        tipos_disponiveis = sorted(df_p["tipo"].dropna().unique().tolist())
+        tipo_filtro = st.sidebar.multiselect(
+            "Tipo de sessão:",
+            options=tipos_disponiveis,
+            default=tipos_disponiveis
+        )
+        data_min = df_p["data"].min()
+        data_max = df_p["data"].max()
+        if pd.notna(data_min) and pd.notna(data_max):
+            periodo = st.sidebar.date_input(
+                "Período:",
+                value=(data_min.date(), data_max.date())
+            )
+        else:
+            periodo = None
+
+        df_filtrado = df_p
+        if tipo_filtro:
+            df_filtrado = df_filtrado[df_filtrado["tipo"].isin(tipo_filtro)]
+        if periodo and len(periodo) == 2:
+            inicio, fim = periodo
+            df_filtrado = df_filtrado[
+                (df_filtrado["data"].dt.date >= inicio) & (df_filtrado["data"].dt.date <= fim)
+            ]
+
         # --- MÉTRICAS FINANCEIRAS ---
-        # Convertendo para float para garantir cálculos precisos
-        v_total = df_p['valor_sessao'].astype(float).sum()
-        p_total = df_p['valor_pago'].astype(float).sum()
+        v_total = df_filtrado["valor_sessao"].sum()
+        p_total = df_filtrado["valor_pago"].sum()
         saldo = p_total - v_total
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Sessões Registadas", len(df_p))
+        col1.metric("Sessões Registadas", len(df_filtrado))
         col2.metric("Total Pago", f"R$ {p_total:,.2f}")
         col3.metric("Saldo do Paciente", f"R$ {saldo:,.2f}", 
                     delta=f"{saldo:,.2f}", delta_color="normal" if saldo >= 0 else "inverse")
@@ -55,14 +87,17 @@ if nomes_pacientes:
         
         with st.expander("🔍 Visualizar Anotações e Notas de Sessão", expanded=True):
             # Filtra apenas registros que tenham anotações preenchidas
-            notas = df_p[df_p['anotacoes_clinicas'].notna() & (df_p['anotacoes_clinicas'] != "")]
+            notas = df_filtrado[
+                df_filtrado["anotacoes_clinicas"].notna()
+                & (df_filtrado["anotacoes_clinicas"] != "")
+            ]
             
             if not notas.empty:
                 for _, row in notas.iterrows():
-                    data_formatada = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
+                    data_formatada = pd.to_datetime(row["data"]).strftime("%d/%m/%Y")
                     st.markdown(f"**🗓️ {data_formatada}** — *{row['tipo']}*")
-                    st.info(row['anotacoes_clinicas'])
-                    if row['obs']:
+                    st.info(row["anotacoes_clinicas"])
+                    if row.get("obs"):
                         st.caption(f"📌 Observação: {row['obs']}")
                     st.divider()
             else:
@@ -71,8 +106,16 @@ if nomes_pacientes:
         # --- TABELA DE LANÇAMENTOS ---
         st.subheader("📑 Detalhamento de Sessões")
         st.dataframe(
-            df_p[['data', 'tipo', 'valor_sessao', 'valor_pago', 'faltas', 'obs']], 
+            df_filtrado[["data", "tipo", "valor_sessao", "valor_pago", "faltas", "obs"]],
             use_container_width=True
+        )
+
+        csv = df_filtrado.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Exportar sessões (CSV)",
+            data=csv,
+            file_name=f"sessoes_{paciente_selecionado}.csv",
+            mime="text/csv"
         )
 
     else:
