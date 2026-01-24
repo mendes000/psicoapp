@@ -6,20 +6,30 @@ from database import supabase
 st.set_page_config(layout="wide", page_title="Sessões")
 
 # --- BUSCA DE DADOS ---
+@st.cache_data(ttl=60)
 def get_pacientes():
     res = supabase.table("pacientes").select("nome").execute()
     return sorted([p['nome'] for p in res.data]) if res.data else []
 
+@st.cache_data(ttl=60)
 def get_ultimo_valor(nome_paciente):
-    res = supabase.table("entradas").select("valor_pago").eq("nome", nome_paciente).order("data", desc=True).limit(1).execute()
-    return float(res.data[0]['valor_pago']) if res.data else 0.0
+    res = supabase.table("entradas")\
+        .select("valor_sessao, valor_pago")\
+        .eq("nome", nome_paciente)\
+        .order("data", desc=True)\
+        .limit(1)\
+        .execute()
+    if res.data:
+        ultimo = res.data[0]
+        return float(ultimo.get("valor_sessao") or 0.0), float(ultimo.get("valor_pago") or 0.0)
+    return 0.0, 0.0
 
 st.title("📝 Lançamento de Atendimento")
 
 nomes = get_pacientes()
 if nomes:
     paciente_sel = st.selectbox("Selecione o Paciente:", nomes)
-    valor_padrao = get_ultimo_valor(paciente_sel)
+    valor_sessao_padrao, valor_pago_padrao = get_ultimo_valor(paciente_sel)
 
     with st.form("form_atendimento", clear_on_submit=True):
         c1, c2 = st.columns(2)
@@ -27,10 +37,12 @@ if nomes:
             data_s = st.date_input("Data:", value=date.today())
             tipo = st.selectbox("Tipo:", ["Sessão Individual", "Avaliação"])
         with c2:
-            v_sessao = st.number_input("Valor Sessão:", value=valor_padrao)
-            v_pago = st.number_input("Valor Pago:", value=valor_padrao)
+            v_sessao = st.number_input("Valor Sessão:", value=valor_sessao_padrao)
+            v_pago = st.number_input("Valor Pago:", value=valor_pago_padrao)
         
         anotacoes = st.text_area("Evolução Clínica:")
+        obs = st.text_area("Observações:")
+        faltou = st.checkbox("Falta/ausência do paciente")
         
         if st.form_submit_button("Salvar Atendimento"):
             dados_sessao = {
@@ -39,7 +51,9 @@ if nomes:
                 "tipo": tipo,
                 "valor_sessao": v_sessao,
                 "valor_pago": v_pago,
-                "anotacoes_clinicas": anotacoes
+                "anotacoes_clinicas": anotacoes,
+                "obs": obs,
+                "faltas": faltou
             }
             try:
                 supabase.table("entradas").insert(dados_sessao).execute()

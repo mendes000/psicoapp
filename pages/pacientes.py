@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import pandas as pd
 from database import supabase # Supondo que centralizou a conexão
@@ -21,6 +22,19 @@ def carregar_origens():
 
 st.title("👤 Cadastro de Paciente (Nuvem)")
 
+def validar_cpf(cpf: str) -> bool:
+    cpf_digits = re.sub(r"\D", "", cpf or "")
+    return len(cpf_digits) == 11
+
+def validar_email(email: str) -> bool:
+    if not email:
+        return True
+    return re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email) is not None
+
+def validar_telefone(telefone: str) -> bool:
+    telefone_digits = re.sub(r"\D", "", telefone or "")
+    return len(telefone_digits) >= 10
+
 lista_origens = carregar_origens()
 origem_sel = st.selectbox("Origem do Lead:", lista_origens)
 
@@ -43,6 +57,12 @@ with st.form("form_paciente", clear_on_submit=True):
 if submit:
     if not nome:
         st.error("O nome é obrigatório.")
+    elif cpf and not validar_cpf(cpf):
+        st.error("CPF inválido. Informe 11 dígitos.")
+    elif not validar_email(email):
+        st.error("E-mail inválido.")
+    elif telefone and not validar_telefone(telefone):
+        st.error("Telefone inválido. Informe DDD + número.")
     else:
         dados = {
             "nome": nome,
@@ -51,7 +71,7 @@ if submit:
             "origem": origem_sel,
             "quem_indicou": quem_indicou,
             "telefone": telefone,
-            "observacoees": obs
+            "observacoes": obs
         }
         try:
             supabase.table("pacientes").insert(dados).execute()
