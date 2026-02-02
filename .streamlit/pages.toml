@@ -1,0 +1,15 @@
+[[pages]]
+path = "psicoapp.py"
+name = "Painel de Pacientes"
+
+[[pages]]
+path = "pages/corrigir_nome.py"
+name = "Correção de Nomes"
+
+[[pages]]
+path = "pages/pacientes.py"
+name = "Cadastro de Pacientes"
+
+[[pages]]
+path = "pages/sessoes.py"
+name = "Lançamento de Sessões"
