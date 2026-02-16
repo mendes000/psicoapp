@@ -1,5 +1,6 @@
 ﻿import streamlit as st
 import pandas as pd
+import streamlit.components.v1 as components
 from database import ensure_login, render_sidebar_user
 
 st.set_page_config(layout="wide", page_title="Corrigir Nome")
@@ -71,6 +72,45 @@ opcoes_entradas = [""] + nomes_entradas
 opcoes_pacientes = [""] + nomes_pacientes
 qtd_entradas_dropdown = len(opcoes_entradas) - 1
 qtd_pacientes_dropdown = len(opcoes_pacientes) - 1
+nomes_entradas_divergentes_set = set(nomes_entradas_divergentes)
+
+
+def formatar_nome_entrada_dropdown(nome):
+    if not nome:
+        return ""
+    if nome in nomes_entradas_divergentes_set:
+        return f"🔴 {nome}"
+    return nome
+
+
+def injetar_estilo_dropdown_entradas():
+    components.html(
+        """
+<script>
+(function () {
+  function destacar() {
+    const parentDoc = window.parent.document;
+    parentDoc.querySelectorAll('[role="option"]').forEach((opt) => {
+      const txt = (opt.textContent || "").trim();
+      if (txt.startsWith("🔴 ")) {
+        opt.style.color = "#d93025";
+        opt.style.fontWeight = "600";
+      } else {
+        opt.style.color = "";
+        opt.style.fontWeight = "";
+      }
+    });
+  }
+  try {
+    destacar();
+    const observer = new MutationObserver(destacar);
+    observer.observe(window.parent.document.body, { childList: true, subtree: true });
+  } catch (err) {}
+})();
+</script>
+        """,
+        height=0,
+    )
 
 if st.session_state.get("flash_success"):
     st.success(st.session_state["flash_success"])
@@ -92,6 +132,7 @@ st.caption(
     f"Nomes em pacientes: {len(nomes_pacientes)} | "
     f"Divergentes: {len(nomes_entradas_divergentes)}"
 )
+st.caption("🔴 Sem correspondencia exata com nomes de pacientes")
 
 with st.form("form_corrigir_nome"):
     col1, col2 = st.columns(2)
@@ -105,6 +146,7 @@ with st.form("form_corrigir_nome"):
             opcoes_entradas,
             key="nome_entrada_sel",
             label_visibility="collapsed",
+            format_func=formatar_nome_entrada_dropdown,
         )
     with col2:
         st.markdown(
@@ -120,6 +162,8 @@ with st.form("form_corrigir_nome"):
 
     nome_final = nome_paciente
     submit = st.form_submit_button("Substituir nome nas entradas")
+
+injetar_estilo_dropdown_entradas()
 
 if submit:
     if not nome_entrada or not nome_final:
