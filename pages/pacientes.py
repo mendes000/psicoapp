@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
 import unicodedata
+import json
+from datetime import date, datetime
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 from database import ensure_login, render_sidebar_user
 
 st.set_page_config(layout="wide", page_title="Cadastro de Pacientes")
@@ -57,11 +61,12 @@ def origem_e_indicacao(origem):
 
 
 def escolher_coluna(colunas_disponiveis, *opcoes):
-    if colunas_disponiveis:
-        for campo in opcoes:
-            if campo in colunas_disponiveis:
-                return campo
-    return opcoes[0]
+    if not colunas_disponiveis:
+        return None
+    for campo in opcoes:
+        if campo in colunas_disponiveis:
+            return campo
+    return None
 
 
 def limpar_payload(dados):
@@ -73,6 +78,12 @@ def limpar_payload(dados):
             continue
         payload[chave] = valor
     return payload
+
+
+def filtrar_colunas_validas(dados, colunas_disponiveis):
+    if not colunas_disponiveis:
+        return dados
+    return {k: v for k, v in dados.items() if k in colunas_disponiveis}
 
 
 def preparar_payload_edicao(dados):
@@ -94,6 +105,127 @@ def valor_registro(registro, *campos):
     return ""
 
 
+def valor_registro_coluna(registro, coluna):
+    if not coluna:
+        return ""
+    return valor_registro(registro, coluna)
+
+
+def parse_data_nascimento(valor):
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    formatos = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d")
+    for formato in formatos:
+        try:
+            return datetime.strptime(texto[:10], formato).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(texto.replace("Z", "+00:00")).date()
+    except Exception:
+        return None
+
+
+def formatar_data_ddmmyyyy(valor):
+    digitos = "".join(c for c in str(valor or "") if c.isdigit())[:8]
+    if len(digitos) <= 2:
+        return digitos
+    if len(digitos) <= 4:
+        return f"{digitos[:2]}/{digitos[2:]}"
+    return f"{digitos[:2]}/{digitos[2:4]}/{digitos[4:]}"
+
+
+def data_para_display_nascimento(valor):
+    data = parse_data_nascimento(valor)
+    if data:
+        return data.strftime("%d/%m/%Y")
+    return formatar_data_ddmmyyyy(valor)
+
+
+def nascimento_para_banco(valor):
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+    data = parse_data_nascimento(texto)
+    if not data:
+        return texto
+    return data.strftime("%Y-%m-%d")
+
+
+def formatar_telefone_br(valor):
+    digitos = "".join(c for c in str(valor or "") if c.isdigit())
+    if len(digitos) > 11 and digitos.startswith("55"):
+        digitos = digitos[2:]
+    digitos = digitos[:11]
+
+    if not digitos:
+        return ""
+    if len(digitos) <= 2:
+        return f"({digitos}"
+
+    ddd = digitos[:2]
+    restante = digitos[2:]
+    if len(restante) == 0:
+        return f"({ddd})"
+    if len(restante) == 1:
+        return f"({ddd}) {restante}"
+
+    primeiro = restante[0]
+    miolo = restante[1:5]
+    final = restante[5:]
+
+    texto = f"({ddd}) {primeiro}"
+    if miolo:
+        texto += f".{miolo}"
+    if final:
+        texto += f"-{final}"
+    return texto
+
+
+def formatar_cep_br(valor):
+    digitos = "".join(c for c in str(valor or "") if c.isdigit())[:8]
+    if len(digitos) <= 5:
+        return digitos
+    return f"{digitos[:5]}-{digitos[5:]}"
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def buscar_endereco_por_cep(cep_digitos):
+    if not cep_digitos or len(cep_digitos) != 8:
+        return None, "CEP invalido."
+    url = f"https://viacep.com.br/ws/{cep_digitos}/json/"
+    try:
+        with urlopen(url, timeout=5) as resposta:
+            payload = json.loads(resposta.read().decode("utf-8"))
+    except (URLError, HTTPError, TimeoutError, ValueError):
+        return None, "Nao foi possivel consultar o CEP agora."
+    except Exception:
+        return None, "Falha inesperada ao consultar o CEP."
+
+    if payload.get("erro"):
+        return None, "CEP nao encontrado."
+
+    return {
+        "endereco": str(payload.get("logradouro") or "").strip(),
+        "bairro": str(payload.get("bairro") or "").strip(),
+        "cidade": str(payload.get("localidade") or "").strip(),
+    }, None
+
+
+def calcular_idade(nascimento_str):
+    nascimento = parse_data_nascimento(nascimento_str)
+    if not nascimento:
+        return ""
+    hoje = date.today()
+    idade = hoje.year - nascimento.year - ((hoje.month, hoje.day) < (nascimento.month, nascimento.day))
+    if idade < 0 or idade > 130:
+        return ""
+    return str(idade)
+
+
 def chave_registro(registro):
     if not registro:
         return "__novo__"
@@ -111,7 +243,6 @@ colunas_pacientes = carregar_colunas_pacientes()
 registros_pacientes = carregar_pacientes()
 
 col_nascimento = escolher_coluna(colunas_pacientes, "nascimento")
-col_idade = escolher_coluna(colunas_pacientes, "idade")
 col_nome_contato = escolher_coluna(colunas_pacientes, "nome_do_contato", "nome_contato")
 col_contato_emergencia = escolher_coluna(colunas_pacientes, "contato_emergencia", "contato_de_emergencia")
 col_nome_pai = escolher_coluna(colunas_pacientes, "nome_do_pai", "nome_pai")
@@ -121,7 +252,6 @@ col_observacoes = escolher_coluna(colunas_pacientes, "observacoees", "observacoe
 KEY_NOME = "cad_nome"
 KEY_NASCIMENTO = "cad_nascimento"
 KEY_CPF = "cad_cpf"
-KEY_IDADE = "cad_idade"
 KEY_TRATAMENTO = "cad_tratamento"
 KEY_PROFISSAO = "cad_profissao"
 KEY_TELEFONE = "cad_telefone"
@@ -135,6 +265,7 @@ KEY_CEP = "cad_cep"
 KEY_NOME_PAI = "cad_nome_pai"
 KEY_NOME_MAE = "cad_nome_mae"
 KEY_OBSERVACOES = "cad_observacoes"
+DEFAULT_TELEFONE = "(62) 9.0000-0000"
 
 
 def limpar_campos_formulario():
@@ -142,7 +273,6 @@ def limpar_campos_formulario():
         KEY_NOME,
         KEY_NASCIMENTO,
         KEY_CPF,
-        KEY_IDADE,
         KEY_TRATAMENTO,
         KEY_PROFISSAO,
         KEY_TELEFONE,
@@ -158,28 +288,31 @@ def limpar_campos_formulario():
         KEY_OBSERVACOES,
     ):
         st.session_state[campo] = ""
+    st.session_state[KEY_TELEFONE] = DEFAULT_TELEFONE
+    st.session_state[KEY_CEP] = ""
     st.session_state["origem_paciente"] = lista_origens[0] if lista_origens else "Particular"
     st.session_state["quem_indicou_paciente"] = ""
+    st.session_state["_cep_consultado"] = ""
+    st.session_state["_cep_erro"] = ""
 
 
 def carregar_campos_formulario(registro):
     st.session_state[KEY_NOME] = valor_registro(registro, "nome")
-    st.session_state[KEY_NASCIMENTO] = valor_registro(registro, col_nascimento)
+    st.session_state[KEY_NASCIMENTO] = data_para_display_nascimento(valor_registro_coluna(registro, col_nascimento))
     st.session_state[KEY_CPF] = valor_registro(registro, "cpf")
-    st.session_state[KEY_IDADE] = valor_registro(registro, col_idade)
     st.session_state[KEY_TRATAMENTO] = valor_registro(registro, "tratamento")
     st.session_state[KEY_PROFISSAO] = valor_registro(registro, "profissao")
-    st.session_state[KEY_TELEFONE] = valor_registro(registro, "telefone")
+    st.session_state[KEY_TELEFONE] = formatar_telefone_br(valor_registro(registro, "telefone"))
     st.session_state[KEY_EMAIL] = valor_registro(registro, "email")
-    st.session_state[KEY_NOME_CONTATO] = valor_registro(registro, col_nome_contato)
-    st.session_state[KEY_CONTATO_EMERGENCIA] = valor_registro(registro, col_contato_emergencia)
+    st.session_state[KEY_NOME_CONTATO] = valor_registro_coluna(registro, col_nome_contato)
+    st.session_state[KEY_CONTATO_EMERGENCIA] = valor_registro_coluna(registro, col_contato_emergencia)
     st.session_state[KEY_ENDERECO] = valor_registro(registro, "endereco")
     st.session_state[KEY_BAIRRO] = valor_registro(registro, "bairro")
     st.session_state[KEY_CIDADE] = valor_registro(registro, "cidade")
-    st.session_state[KEY_CEP] = valor_registro(registro, "cep")
-    st.session_state[KEY_NOME_PAI] = valor_registro(registro, col_nome_pai)
-    st.session_state[KEY_NOME_MAE] = valor_registro(registro, col_nome_mae)
-    st.session_state[KEY_OBSERVACOES] = valor_registro(registro, col_observacoes)
+    st.session_state[KEY_CEP] = formatar_cep_br(valor_registro(registro, "cep"))
+    st.session_state[KEY_NOME_PAI] = valor_registro_coluna(registro, col_nome_pai)
+    st.session_state[KEY_NOME_MAE] = valor_registro_coluna(registro, col_nome_mae)
+    st.session_state[KEY_OBSERVACOES] = valor_registro_coluna(registro, col_observacoes)
 
     origem_registro = valor_registro(registro, "origem")
     if origem_registro:
@@ -189,21 +322,25 @@ def carregar_campos_formulario(registro):
     else:
         st.session_state["origem_paciente"] = "Particular"
     st.session_state["quem_indicou_paciente"] = valor_registro(registro, "quem_indicou")
+    st.session_state["_cep_consultado"] = "".join(c for c in st.session_state.get(KEY_CEP, "") if c.isdigit())
+    st.session_state["_cep_erro"] = ""
 
 
-opcao_novo = "+ Criar novo paciente"
+opcao_novo_key = "__novo__"
 mapa_pacientes = {}
-opcoes_seletor = [opcao_novo]
+rotulos_pacientes = {opcao_novo_key: "+ Criar novo paciente"}
+opcoes_seletor = [opcao_novo_key]
 for i, registro in enumerate(registros_pacientes, start=1):
+    chave = f"pac_{i}"
     nome_label = valor_registro(registro, "nome") or "(Sem nome)"
     cpf_label = valor_registro(registro, "cpf")
-    id_label = valor_registro(registro, "id") or str(i)
     if cpf_label:
-        label = f"{nome_label} | CPF {cpf_label} | ID {id_label}"
+        label = f"{nome_label} | CPF {cpf_label}"
     else:
-        label = f"{nome_label} | ID {id_label}"
-    opcoes_seletor.append(label)
-    mapa_pacientes[label] = registro
+        label = nome_label
+    opcoes_seletor.append(chave)
+    mapa_pacientes[chave] = registro
+    rotulos_pacientes[chave] = label
 
 st.markdown("### Paciente")
 col_seletor, col_modo = st.columns([4, 1])
@@ -211,11 +348,12 @@ with col_seletor:
     selecao_paciente = st.selectbox(
         "Buscar paciente existente para editar ou escolher novo cadastro:",
         opcoes_seletor,
+        format_func=lambda chave: rotulos_pacientes.get(chave, chave),
         key="cadastro_paciente_seletor",
         help="Digite no campo para filtrar por nome ou CPF.",
     )
 with col_modo:
-    modo_edicao = selecao_paciente != opcao_novo
+    modo_edicao = selecao_paciente != opcao_novo_key
     st.markdown("**Modo**")
     st.write("Edicao" if modo_edicao else "Novo")
 
@@ -241,75 +379,117 @@ if origem_e_indicacao(origem_sel):
 else:
     st.session_state["quem_indicou_paciente"] = ""
 
-with st.form("form_paciente", clear_on_submit=False):
-    st.markdown("### Dados do Paciente")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        nome = st.text_input("Nome Completo:", key=KEY_NOME)
-        nascimento = st.text_input("Nascimento (AAAA-MM-DD):", key=KEY_NASCIMENTO)
-    with col2:
-        cpf = st.text_input("CPF:", key=KEY_CPF)
-        idade = st.text_input("Idade:", key=KEY_IDADE)
-    with col3:
-        tratamento = st.text_input("Tratamento:", key=KEY_TRATAMENTO)
-        profissao = st.text_input("Profissao:", key=KEY_PROFISSAO)
+st.markdown("### Dados do Paciente")
+col1, col2, col3 = st.columns(3)
+st.session_state[KEY_NASCIMENTO] = formatar_data_ddmmyyyy(st.session_state.get(KEY_NASCIMENTO, ""))
+st.session_state[KEY_TELEFONE] = formatar_telefone_br(st.session_state.get(KEY_TELEFONE, DEFAULT_TELEFONE))
+st.session_state[KEY_CEP] = formatar_cep_br(st.session_state.get(KEY_CEP, ""))
+with col1:
+    nome = st.text_input("Nome Completo:", key=KEY_NOME)
+    nascimento = st.text_input(
+        "Nascimento (DD/MM/AAAA):",
+        key=KEY_NASCIMENTO,
+        placeholder="DD/MM/AAAA",
+        max_chars=10,
+    )
+with col2:
+    cpf = st.text_input("CPF:", key=KEY_CPF)
+    idade_visual = calcular_idade(nascimento)
+    st.text_input("Idade (automatica):", value=idade_visual, disabled=True)
+with col3:
+    tratamento = st.text_input("Tratamento:", key=KEY_TRATAMENTO)
+    profissao = st.text_input("Profissao:", key=KEY_PROFISSAO)
 
-    st.markdown("### Contato")
-    col1, col2 = st.columns(2)
-    with col1:
-        telefone = st.text_input("Telefone:", key=KEY_TELEFONE)
-        email = st.text_input("E-mail:", key=KEY_EMAIL)
-    with col2:
-        nome_contato = st.text_input("Nome do Contato de Emergencia:", key=KEY_NOME_CONTATO)
-        contato_emergencia = st.text_input("Contato de Emergencia:", key=KEY_CONTATO_EMERGENCIA)
+if nascimento and not idade_visual:
+    st.caption("Informe a data de nascimento no formato DD/MM/AAAA.")
 
-    st.markdown("### Endereco")
-    col1, col2 = st.columns(2)
-    with col1:
-        endereco = st.text_input("Endereco:", key=KEY_ENDERECO)
-        bairro = st.text_input("Bairro:", key=KEY_BAIRRO)
-    with col2:
-        cidade = st.text_input("Cidade:", key=KEY_CIDADE)
-        cep = st.text_input("CEP:", key=KEY_CEP)
+st.markdown("### Contato")
+col1, col2 = st.columns(2)
+with col1:
+    telefone = st.text_input("Telefone:", key=KEY_TELEFONE, placeholder="(62) 9.0000-0000", max_chars=16)
+    email = st.text_input("E-mail:", key=KEY_EMAIL)
+with col2:
+    nome_contato = st.text_input("Nome do Contato de Emergencia:", key=KEY_NOME_CONTATO)
+    contato_emergencia = st.text_input("Contato de Emergencia:", key=KEY_CONTATO_EMERGENCIA)
 
-    st.markdown("### Filiacao")
-    col1, col2 = st.columns(2)
-    with col1:
-        nome_pai = st.text_input("Nome do Pai:", key=KEY_NOME_PAI)
-    with col2:
-        nome_mae = st.text_input("Nome da Mae:", key=KEY_NOME_MAE)
+st.markdown("### Endereco")
+cep = st.text_input("CEP:", key=KEY_CEP, placeholder="00000-000", max_chars=9)
+cep_digitos = "".join(c for c in str(cep or "") if c.isdigit())
+cep_consultado = st.session_state.get("_cep_consultado", "")
 
-    st.markdown("### Observacoes")
-    observacoes = st.text_area("Observacoes:", key=KEY_OBSERVACOES)
-    submit = st.form_submit_button("Atualizar Paciente" if modo_edicao else "Salvar Novo Paciente")
+if len(cep_digitos) == 8 and cep_digitos != cep_consultado:
+    dados_cep, erro_cep = buscar_endereco_por_cep(cep_digitos)
+    st.session_state["_cep_consultado"] = cep_digitos
+    st.session_state["_cep_erro"] = erro_cep or ""
+    if dados_cep:
+        if not str(st.session_state.get(KEY_ENDERECO, "")).strip():
+            st.session_state[KEY_ENDERECO] = dados_cep.get("endereco", "")
+        if not str(st.session_state.get(KEY_BAIRRO, "")).strip():
+            st.session_state[KEY_BAIRRO] = dados_cep.get("bairro", "")
+        if not str(st.session_state.get(KEY_CIDADE, "")).strip():
+            st.session_state[KEY_CIDADE] = dados_cep.get("cidade", "")
+elif len(cep_digitos) < 8:
+    st.session_state["_cep_consultado"] = ""
+    st.session_state["_cep_erro"] = ""
+
+if st.session_state.get("_cep_erro"):
+    st.caption(st.session_state.get("_cep_erro"))
+
+col1, col2 = st.columns(2)
+with col1:
+    endereco = st.text_input("Endereco:", key=KEY_ENDERECO)
+    bairro = st.text_input("Bairro:", key=KEY_BAIRRO)
+with col2:
+    cidade = st.text_input("Cidade:", key=KEY_CIDADE)
+
+st.markdown("### Filiacao")
+col1, col2 = st.columns(2)
+with col1:
+    nome_pai = st.text_input("Nome do Pai:", key=KEY_NOME_PAI)
+with col2:
+    nome_mae = st.text_input("Nome da Mae:", key=KEY_NOME_MAE)
+
+st.markdown("### Observacoes")
+observacoes = st.text_area("Observacoes:", key=KEY_OBSERVACOES)
+
+submit = st.button("Atualizar Paciente" if modo_edicao else "Salvar Novo Paciente", type="primary")
 
 if submit:
     nome = nome.strip()
     if not nome:
         st.error("O nome e obrigatorio.")
     else:
+        nascimento_para_salvar = nascimento_para_banco(nascimento)
+        if nascimento and not parse_data_nascimento(nascimento):
+            st.error("Data de nascimento invalida. Use o formato DD/MM/AAAA.")
+            st.stop()
         dados_base = {
             "nome": nome,
-            col_nascimento: nascimento,
-            col_idade: idade,
             "tratamento": tratamento,
             "cpf": cpf,
             "email": email,
             "telefone": telefone,
             "profissao": profissao,
             "origem": origem_sel,
-            "quem_indicou": quem_indicou,
-            col_nome_contato: nome_contato,
-            col_contato_emergencia: contato_emergencia,
             "endereco": endereco,
             "bairro": bairro,
             "cidade": cidade,
             "cep": cep,
-            col_nome_pai: nome_pai,
-            col_nome_mae: nome_mae,
-            col_observacoes: observacoes,
         }
+        if col_nascimento:
+            dados_base[col_nascimento] = nascimento_para_salvar
+        if col_nome_contato:
+            dados_base[col_nome_contato] = nome_contato
+        if col_contato_emergencia:
+            dados_base[col_contato_emergencia] = contato_emergencia
+        if col_nome_pai:
+            dados_base[col_nome_pai] = nome_pai
+        if col_nome_mae:
+            dados_base[col_nome_mae] = nome_mae
+        if col_observacoes:
+            dados_base[col_observacoes] = observacoes
         dados_base["quem_indicou"] = quem_indicou if origem_e_indicacao(origem_sel) else (None if modo_edicao else "")
+        dados_base = filtrar_colunas_validas(dados_base, colunas_pacientes)
         try:
             if modo_edicao and paciente_selecionado:
                 dados = preparar_payload_edicao(dados_base)
