@@ -1,5 +1,6 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
+import unicodedata
 from database import ensure_login, render_sidebar_user
 
 st.set_page_config(layout="wide", page_title="Cadastro de Pacientes")
@@ -13,13 +14,27 @@ def carregar_origens():
         res = client.table("pacientes").select("origem").execute()
         if res.data and len(res.data) > 0:
             df = pd.DataFrame(res.data)
-            if 'origem' in df.columns:
-                origens = df['origem'].dropna().unique().tolist()
+            if "origem" in df.columns:
+                origens = df["origem"].dropna().unique().tolist()
                 return sorted([str(o) for o in origens if o])
         return ["Particular", "Indicacao", "Instagram", "Google Ads"]
     except Exception as e:
         st.error(f"Erro de Conexao: {e}")
         return ["Particular", "Indicacao"]
+
+
+def normalizar_texto(valor):
+    if not valor:
+        return ""
+    texto = str(valor).strip().lower()
+    return "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def origem_e_indicacao(origem):
+    return normalizar_texto(origem) in {"indicacao", "indicacoes"}
 
 
 st.title("Cadastro de Paciente (Nuvem)")
@@ -35,7 +50,7 @@ with st.form("form_paciente", clear_on_submit=True):
         email = st.text_input("E-mail:")
     with col2:
         quem_indicou = ""
-        if origem_sel == "Indicacao":
+        if origem_e_indicacao(origem_sel):
             quem_indicou = st.text_input("Quem indicou?")
         telefone = st.text_input("Telefone:")
 
@@ -53,7 +68,7 @@ if submit:
             "origem": origem_sel,
             "quem_indicou": quem_indicou,
             "telefone": telefone,
-            "observacoees": obs
+            "observacoees": obs,
         }
         try:
             client.table("pacientes").insert(dados).execute()
