@@ -61,13 +61,46 @@ def deduplicar_textos(valores):
     return resultado
 
 
+def parse_tratamentos(valor):
+    if valor is None:
+        return []
+
+    if isinstance(valor, list):
+        return deduplicar_textos(valor)
+
+    texto = str(valor).strip()
+    if not texto:
+        return []
+
+    if texto.startswith("[") and texto.endswith("]"):
+        try:
+            itens = json.loads(texto)
+            if isinstance(itens, list):
+                return deduplicar_textos(itens)
+        except Exception:
+            pass
+
+    for separador in (";", "|", ","):
+        if separador in texto:
+            return deduplicar_textos(parte for parte in texto.split(separador))
+
+    return [texto]
+
+
+def serializar_tratamentos(valores):
+    return "; ".join(deduplicar_textos(valores))
+
+
 @st.cache_data(show_spinner=False, ttl=60 * 10)
 def carregar_tratamentos():
     try:
         res = client.table("pacientes").select("tratamento").execute()
         if not res.data:
             return []
-        return deduplicar_textos(registro.get("tratamento") for registro in res.data)
+        tratamentos = []
+        for registro in res.data:
+            tratamentos.extend(parse_tratamentos(registro.get("tratamento")))
+        return deduplicar_textos(tratamentos)
     except Exception:
         return []
 
@@ -301,7 +334,6 @@ TRATAMENTOS_PADRAO = [
     "Terapia para Adultos",
     "Avalia\u00e7\u00e3o Neuropsicol\u00f3gica",
 ]
-OPCAO_TRATAMENTO_VAZIO = ""
 OPCAO_NOVO_TRATAMENTO = "+ Adicionar novo"
 
 
@@ -327,7 +359,7 @@ def limpar_campos_formulario():
         st.session_state[campo] = ""
     st.session_state[KEY_TELEFONE] = DEFAULT_TELEFONE
     st.session_state[KEY_CEP] = ""
-    st.session_state[KEY_TRATAMENTO_SELECT] = OPCAO_TRATAMENTO_VAZIO
+    st.session_state[KEY_TRATAMENTO_SELECT] = []
     st.session_state[KEY_TRATAMENTO] = ""
     st.session_state[KEY_TRATAMENTO_NOVO] = ""
     st.session_state["origem_paciente"] = lista_origens[0] if lista_origens else "Particular"
@@ -341,8 +373,9 @@ def carregar_campos_formulario(registro):
     st.session_state[KEY_NASCIMENTO] = data_para_display_nascimento(valor_registro_coluna(registro, col_nascimento))
     st.session_state[KEY_CPF] = valor_registro(registro, "cpf")
     tratamento_registro = valor_registro(registro, "tratamento")
-    st.session_state[KEY_TRATAMENTO] = tratamento_registro
-    st.session_state[KEY_TRATAMENTO_SELECT] = tratamento_registro or OPCAO_TRATAMENTO_VAZIO
+    tratamentos_registro = parse_tratamentos(tratamento_registro)
+    st.session_state[KEY_TRATAMENTO] = serializar_tratamentos(tratamentos_registro)
+    st.session_state[KEY_TRATAMENTO_SELECT] = tratamentos_registro
     st.session_state[KEY_TRATAMENTO_NOVO] = ""
     st.session_state[KEY_PROFISSAO] = valor_registro(registro, "profissao")
     st.session_state[KEY_TELEFONE] = formatar_telefone_br(valor_registro(registro, "telefone"))
@@ -427,15 +460,17 @@ col1, col2, col3 = st.columns(3)
 st.session_state[KEY_NASCIMENTO] = formatar_data_ddmmyyyy(st.session_state.get(KEY_NASCIMENTO, ""))
 st.session_state[KEY_TELEFONE] = formatar_telefone_br(st.session_state.get(KEY_TELEFONE, DEFAULT_TELEFONE))
 st.session_state[KEY_CEP] = formatar_cep_br(st.session_state.get(KEY_CEP, ""))
-tratamento_atual = str(st.session_state.get(KEY_TRATAMENTO, "")).strip()
+tratamentos_atuais = parse_tratamentos(st.session_state.get(KEY_TRATAMENTO, ""))
 lista_tratamentos = deduplicar_textos(
-    [*TRATAMENTOS_PADRAO, *carregar_tratamentos(), tratamento_atual]
+    [*TRATAMENTOS_PADRAO, *carregar_tratamentos(), *tratamentos_atuais]
 )
-opcoes_tratamento = [OPCAO_TRATAMENTO_VAZIO, *lista_tratamentos, OPCAO_NOVO_TRATAMENTO]
-if st.session_state.get(KEY_TRATAMENTO_SELECT) not in opcoes_tratamento:
-    st.session_state[KEY_TRATAMENTO_SELECT] = (
-        tratamento_atual if tratamento_atual else OPCAO_TRATAMENTO_VAZIO
-    )
+opcoes_tratamento = [*lista_tratamentos, OPCAO_NOVO_TRATAMENTO]
+tratamentos_estado = st.session_state.get(KEY_TRATAMENTO_SELECT, [])
+if isinstance(tratamentos_estado, str):
+    tratamentos_estado = parse_tratamentos(tratamentos_estado)
+tratamentos_estado = [item for item in deduplicar_textos(tratamentos_estado) if item in opcoes_tratamento]
+if tratamentos_estado != st.session_state.get(KEY_TRATAMENTO_SELECT):
+    st.session_state[KEY_TRATAMENTO_SELECT] = tratamentos_estado
 with col1:
     nome = st.text_input("Nome Completo:", key=KEY_NOME)
     nascimento = st.text_input(
@@ -449,17 +484,24 @@ with col2:
     idade_visual = calcular_idade(nascimento)
     st.text_input("Idade (automatica):", value=idade_visual, disabled=True)
 with col3:
-    tratamento_sel = st.selectbox("Tratamento:", opcoes_tratamento, key=KEY_TRATAMENTO_SELECT)
-    if tratamento_sel == OPCAO_NOVO_TRATAMENTO:
+    tratamentos_sel = st.multiselect(
+        "Tratamento:",
+        opcoes_tratamento,
+        key=KEY_TRATAMENTO_SELECT,
+        placeholder="Selecione um ou mais tratamentos",
+    )
+    if OPCAO_NOVO_TRATAMENTO in tratamentos_sel:
         tratamento_novo = st.text_input(
             "Novo tratamento:",
             key=KEY_TRATAMENTO_NOVO,
             placeholder="Digite um novo tipo de tratamento",
         )
-        tratamento = tratamento_novo.strip()
     else:
         st.session_state[KEY_TRATAMENTO_NOVO] = ""
-        tratamento = tratamento_sel
+        tratamento_novo = ""
+    tratamentos_final = [item for item in tratamentos_sel if item != OPCAO_NOVO_TRATAMENTO]
+    tratamentos_final = deduplicar_textos([*tratamentos_final, *parse_tratamentos(tratamento_novo)])
+    tratamento = serializar_tratamentos(tratamentos_final)
     st.session_state[KEY_TRATAMENTO] = tratamento
     profissao = st.text_input("Profissao:", key=KEY_PROFISSAO)
 
