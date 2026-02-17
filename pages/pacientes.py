@@ -46,6 +46,32 @@ def carregar_pacientes():
         return []
 
 
+def deduplicar_textos(valores):
+    vistos = set()
+    resultado = []
+    for valor in valores:
+        texto = str(valor or "").strip()
+        if not texto:
+            continue
+        chave = normalizar_texto(texto)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        resultado.append(texto)
+    return resultado
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 10)
+def carregar_tratamentos():
+    try:
+        res = client.table("pacientes").select("tratamento").execute()
+        if not res.data:
+            return []
+        return deduplicar_textos(registro.get("tratamento") for registro in res.data)
+    except Exception:
+        return []
+
+
 def normalizar_texto(valor):
     if not valor:
         return ""
@@ -253,6 +279,8 @@ KEY_NOME = "cad_nome"
 KEY_NASCIMENTO = "cad_nascimento"
 KEY_CPF = "cad_cpf"
 KEY_TRATAMENTO = "cad_tratamento"
+KEY_TRATAMENTO_SELECT = "cad_tratamento_select"
+KEY_TRATAMENTO_NOVO = "cad_tratamento_novo"
 KEY_PROFISSAO = "cad_profissao"
 KEY_TELEFONE = "cad_telefone"
 KEY_EMAIL = "cad_email"
@@ -266,6 +294,15 @@ KEY_NOME_PAI = "cad_nome_pai"
 KEY_NOME_MAE = "cad_nome_mae"
 KEY_OBSERVACOES = "cad_observacoes"
 DEFAULT_TELEFONE = "(62) 9.0000-0000"
+TRATAMENTOS_PADRAO = [
+    "Sess\u00e3o Avulsa",
+    "Terapia Infantil",
+    "Terapia para Adolescentes",
+    "Terapia para Adultos",
+    "Avalia\u00e7\u00e3o Neuropsicol\u00f3gica",
+]
+OPCAO_TRATAMENTO_VAZIO = ""
+OPCAO_NOVO_TRATAMENTO = "+ Adicionar novo"
 
 
 def limpar_campos_formulario():
@@ -290,6 +327,9 @@ def limpar_campos_formulario():
         st.session_state[campo] = ""
     st.session_state[KEY_TELEFONE] = DEFAULT_TELEFONE
     st.session_state[KEY_CEP] = ""
+    st.session_state[KEY_TRATAMENTO_SELECT] = OPCAO_TRATAMENTO_VAZIO
+    st.session_state[KEY_TRATAMENTO] = ""
+    st.session_state[KEY_TRATAMENTO_NOVO] = ""
     st.session_state["origem_paciente"] = lista_origens[0] if lista_origens else "Particular"
     st.session_state["quem_indicou_paciente"] = ""
     st.session_state["_cep_consultado"] = ""
@@ -300,7 +340,10 @@ def carregar_campos_formulario(registro):
     st.session_state[KEY_NOME] = valor_registro(registro, "nome")
     st.session_state[KEY_NASCIMENTO] = data_para_display_nascimento(valor_registro_coluna(registro, col_nascimento))
     st.session_state[KEY_CPF] = valor_registro(registro, "cpf")
-    st.session_state[KEY_TRATAMENTO] = valor_registro(registro, "tratamento")
+    tratamento_registro = valor_registro(registro, "tratamento")
+    st.session_state[KEY_TRATAMENTO] = tratamento_registro
+    st.session_state[KEY_TRATAMENTO_SELECT] = tratamento_registro or OPCAO_TRATAMENTO_VAZIO
+    st.session_state[KEY_TRATAMENTO_NOVO] = ""
     st.session_state[KEY_PROFISSAO] = valor_registro(registro, "profissao")
     st.session_state[KEY_TELEFONE] = formatar_telefone_br(valor_registro(registro, "telefone"))
     st.session_state[KEY_EMAIL] = valor_registro(registro, "email")
@@ -384,6 +427,15 @@ col1, col2, col3 = st.columns(3)
 st.session_state[KEY_NASCIMENTO] = formatar_data_ddmmyyyy(st.session_state.get(KEY_NASCIMENTO, ""))
 st.session_state[KEY_TELEFONE] = formatar_telefone_br(st.session_state.get(KEY_TELEFONE, DEFAULT_TELEFONE))
 st.session_state[KEY_CEP] = formatar_cep_br(st.session_state.get(KEY_CEP, ""))
+tratamento_atual = str(st.session_state.get(KEY_TRATAMENTO, "")).strip()
+lista_tratamentos = deduplicar_textos(
+    [*TRATAMENTOS_PADRAO, *carregar_tratamentos(), tratamento_atual]
+)
+opcoes_tratamento = [OPCAO_TRATAMENTO_VAZIO, *lista_tratamentos, OPCAO_NOVO_TRATAMENTO]
+if st.session_state.get(KEY_TRATAMENTO_SELECT) not in opcoes_tratamento:
+    st.session_state[KEY_TRATAMENTO_SELECT] = (
+        tratamento_atual if tratamento_atual else OPCAO_TRATAMENTO_VAZIO
+    )
 with col1:
     nome = st.text_input("Nome Completo:", key=KEY_NOME)
     nascimento = st.text_input(
@@ -397,7 +449,18 @@ with col2:
     idade_visual = calcular_idade(nascimento)
     st.text_input("Idade (automatica):", value=idade_visual, disabled=True)
 with col3:
-    tratamento = st.text_input("Tratamento:", key=KEY_TRATAMENTO)
+    tratamento_sel = st.selectbox("Tratamento:", opcoes_tratamento, key=KEY_TRATAMENTO_SELECT)
+    if tratamento_sel == OPCAO_NOVO_TRATAMENTO:
+        tratamento_novo = st.text_input(
+            "Novo tratamento:",
+            key=KEY_TRATAMENTO_NOVO,
+            placeholder="Digite um novo tipo de tratamento",
+        )
+        tratamento = tratamento_novo.strip()
+    else:
+        st.session_state[KEY_TRATAMENTO_NOVO] = ""
+        tratamento = tratamento_sel
+    st.session_state[KEY_TRATAMENTO] = tratamento
     profissao = st.text_input("Profissao:", key=KEY_PROFISSAO)
 
 if nascimento and not idade_visual:
