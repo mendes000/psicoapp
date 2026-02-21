@@ -62,8 +62,17 @@ def ensure_login():
     if is_logged_in():
         return get_user_client()
 
-    st.sidebar.subheader("Login")
-    with st.sidebar.form("login_form"):
+    st.markdown(
+        """
+<style>
+section[data-testid="stSidebar"] { display: none !important; }
+button[kind="header"] { display: none !important; }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+    st.subheader("Login")
+    with st.form("login_form"):
         email = st.text_input("Email", key="login_email")
         password = st.text_input("Senha", type="password", key="login_password")
         submit = st.form_submit_button("Entrar")
@@ -78,36 +87,51 @@ def render_sidebar_user():
     if not is_logged_in():
         return
 
-    if not st.session_state.get("_sidebar_css"):
+    if not st.session_state.get("_topbar_css"):
         st.markdown(
             """
 <style>
-section[data-testid="stSidebar"] div[data-testid="stSidebarContent"] {
+section[data-testid="stSidebar"] { display: none !important; }
+button[kind="header"] { display: none !important; }
+.top-user-wrap {
+  width: 100%;
   display: flex;
-  flex-direction: column;
-  height: 100%;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 1rem;
+  margin: 0;
+  padding: 0;
 }
-.sidebar-spacer {
-  flex: 1 1 auto;
+.top-user-email {
+  font-size: 0.82rem;
+  opacity: 0.75;
+  line-height: 1rem;
 }
-.sidebar-email {
-  font-size: 0.95rem;
-  color: #9fb7ff;
-  padding: 0.25rem 0 0.5rem 0;
+div[data-testid="stButton"] > button[kind="secondary"] {
+  min-height: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  line-height: 1rem;
+  font-size: 0.8rem;
 }
 </style>
 """,
             unsafe_allow_html=True,
         )
-        st.session_state["_sidebar_css"] = True
+        st.session_state["_topbar_css"] = True
 
-    st.sidebar.markdown("<div class='sidebar-spacer'></div>", unsafe_allow_html=True)
     email = st.session_state.get("sb_user_email", "")
-    if email:
-        st.sidebar.markdown(f"<div class='sidebar-email'>{email}</div>", unsafe_allow_html=True)
-    if st.sidebar.button("Sair"):
-        sign_out()
-        st.rerun()
+    c1, c2, c3 = st.columns([18, 5, 1])
+    with c2:
+        if email:
+            st.markdown(
+                f"<div class='top-user-wrap'><span class='top-user-email'>{email}</span></div>",
+                unsafe_allow_html=True,
+            )
+    with c3:
+        if st.button("↪", help="Sair", key="logout_top_icon"):
+            sign_out()
+            st.rerun()
 
 
 supabase = init_anon_connection()
