@@ -205,3 +205,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Supabase local metadata
+supabase/.temp/
+
+# Legacy/obsolete files kept only locally
+antigos/
+migrar_dados.py
+pages/corrigir_nome.py
+pages/tabelas.py
+supabase/migrations/20260221095500_create_pacientes_consolidados.sql
