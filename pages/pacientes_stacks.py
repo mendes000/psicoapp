@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import date, datetime
 import unicodedata
 from difflib import SequenceMatcher
+import streamlit.components.v1 as components
 
 from database import ensure_login, render_sidebar_user
 
@@ -390,6 +391,56 @@ def filtro_aproximado_nome(nome_norm, filtro_norm):
     return SequenceMatcher(None, nome_norm, filtro_norm).ratio() >= 0.72
 
 
+def injetar_accordion_por_nivel():
+    components.html(
+        """
+<script>
+(function () {
+  const parentDoc = window.parent.document;
+  if (!parentDoc || parentDoc.__psicoAccordionBound) return;
+  parentDoc.__psicoAccordionBound = true;
+
+  function detalhes() {
+    return Array.from(parentDoc.querySelectorAll("details"));
+  }
+
+  function profundidade(el) {
+    let d = 0;
+    let atual = el.parentElement;
+    while (atual) {
+      if (atual.tagName === "DETAILS") d += 1;
+      atual = atual.parentElement;
+    }
+    return d;
+  }
+
+  function bind() {
+    detalhes().forEach((el) => {
+      if (el.dataset.psicoAccordion === "1") return;
+      el.dataset.psicoAccordion = "1";
+      el.addEventListener("toggle", function () {
+        if (!el.open) return;
+        const nivel = profundidade(el);
+        detalhes().forEach((outro) => {
+          if (outro === el) return;
+          if (profundidade(outro) === nivel) {
+            outro.open = false;
+          }
+        });
+      });
+    });
+  }
+
+  bind();
+  const obs = new MutationObserver(bind);
+  obs.observe(parentDoc.body, { childList: true, subtree: true });
+})();
+</script>
+        """,
+        height=0,
+    )
+
+
 st.markdown(
     """
 <style>
@@ -410,8 +461,9 @@ div[data-testid="stExpander"] {
 """,
     unsafe_allow_html=True,
 )
+injetar_accordion_por_nivel()
 
-col_busca, col_btn_pac, col_btn_sess, col_btn_cal = st.columns([6, 2, 2, 0.8])
+col_busca, col_btn_pac, col_btn_sess, col_btn_cal = st.columns([7.2, 1.2, 1.2, 0.4])
 
 with col_busca:
     filtro = st.text_input(
@@ -422,21 +474,21 @@ with col_busca:
     ).strip()
 
 with col_btn_pac:
-    if st.button("➕ Pacientes", use_container_width=True):
+    if st.button("➕ Pacientes", use_container_width=False):
         if hasattr(st, "switch_page"):
             st.switch_page("pages/pacientes.py")
         else:
             st.warning("Navegacao indisponivel nesta versao do Streamlit.")
 
 with col_btn_sess:
-    if st.button("➕ Sesões", use_container_width=True):
+    if st.button("➕ Sesões", use_container_width=False):
         if hasattr(st, "switch_page"):
             st.switch_page("pages/sessoes.py")
         else:
             st.warning("Navegacao indisponivel nesta versao do Streamlit.")
 
 with col_btn_cal:
-    if st.button("📅", use_container_width=True, help="Abrir calendario"):
+    if st.button("📅", use_container_width=False, help="Abrir calendario"):
         if hasattr(st, "switch_page"):
             st.switch_page("pages/calendario.py")
         else:

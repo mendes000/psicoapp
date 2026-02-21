@@ -93,6 +93,7 @@ def render_sidebar_user():
 <style>
 section[data-testid="stSidebar"] { display: none !important; }
 button[kind="header"] { display: none !important; }
+section.main > div.block-container { padding-top: 0.2rem !important; }
 .top-user-wrap {
   width: 100%;
   display: flex;
@@ -121,15 +122,15 @@ div[data-testid="stButton"] > button[kind="secondary"] {
         st.session_state["_topbar_css"] = True
 
     email = st.session_state.get("sb_user_email", "")
-    c1, c2, c3 = st.columns([18, 5, 1])
-    with c2:
+    c_spacer, c_email, c_btn = st.columns([22, 5, 1])
+    with c_email:
         if email:
             st.markdown(
                 f"<div class='top-user-wrap'><span class='top-user-email'>{email}</span></div>",
                 unsafe_allow_html=True,
             )
-    with c3:
-        if st.button("↪", help="Sair", key="logout_top_icon"):
+    with c_btn:
+        if st.button("?", help="Sair", key="logout_top_icon"):
             sign_out()
             st.rerun()
 
