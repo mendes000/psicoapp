@@ -14,11 +14,37 @@ Isso faz sentido aqui porque:
 
 Com isso, o build gera arquivos estaticos em `out/`, que podem ser hospedados no Pages sem camada extra.
 
+## Deploy automatico via GitHub Actions
+
+O repositorio inclui o workflow:
+
+- `.github/workflows/deploy-cloudflare-pages.yml`
+
+Esse workflow:
+
+- roda em todo `push` para `main`
+- executa `npm ci`
+- executa `npm run typecheck`
+- executa `npm run build`
+- publica `out/` no projeto Cloudflare Pages `psicoapp-6fq`
+
+### Secrets necessarios no GitHub
+
+No repositorio, crie em `Settings > Secrets and variables > Actions`:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`
+
+O token deve ter pelo menos permissao de editar Pages no account da Cloudflare.
+
+Depois de salvar esses dois secrets, qualquer `push` na branch `main` passa a disparar o deploy automatico.
+
 ## Ajustes feitos no projeto
 
 - `next.config.ts` usa `output: "export"`
 - `.nvmrc` fixa `Node 20`
 - o build gera a saida estatica padrao em `out/`
+- o build replica `out/_next` em `out/cdn/_next` para compatibilidade com o Pages em upload/deploy direto
 
 ## Configuracao no painel do Cloudflare Pages
 
@@ -29,6 +55,14 @@ Ao conectar o repositorio:
 - Framework preset: `Next.js (Static HTML Export)`
 - Build command: `npm run build`
 - Build output directory: `out`
+
+### Opcao 2: Direct Upload com CI
+
+Se voce quiser manter o projeto atual de Direct Upload e mesmo assim automatizar deploys:
+
+- mantenha o projeto existente no Cloudflare Pages
+- use o workflow do GitHub Actions deste repositorio
+- publique com `wrangler pages deploy out --project-name=psicoapp-6fq`
 
 ### Variaveis de ambiente
 
