@@ -21,10 +21,56 @@ import {
 type TableName = "pacientes" | "entradas" | "agendamentos";
 
 const PAGE_SIZE = 1000;
+const PATIENT_COLUMNS = [
+  "id",
+  "nome",
+  "nascimento",
+  "cpf",
+  "tratamento",
+  "profissao",
+  "origem",
+  "quem_indicou",
+  "telefone",
+  "email",
+  "nome_do_contato",
+  "nome_contato",
+  "contato_emergencia",
+  "contato_de_emergencia",
+  "endereco",
+  "bairro",
+  "cidade",
+  "cep",
+  "nome_do_pai",
+  "nome_pai",
+  "nome_da_mae",
+  "nome_mae",
+  "observacoees",
+  "observacoes",
+].join(", ");
+const ENTRY_COLUMNS = [
+  "id",
+  "data",
+  "nome",
+  "tipo",
+  "valor_sessao",
+  "valor_pago",
+  "obs",
+  "anotacoes_clinicas",
+].join(", ");
+const SCHEDULE_COLUMNS = [
+  "id",
+  "data",
+  "nome",
+  "tipo",
+  "valor_sessao",
+  "valor_pago",
+  "obs",
+].join(", ");
 
 async function fetchAllRows<T>(
   table: TableName,
   orderBy: string,
+  columns = "*",
   ascending = true,
 ) {
   const supabase = getSupabaseBrowserClient();
@@ -34,7 +80,7 @@ async function fetchAllRows<T>(
   while (true) {
     const { data, error } = await supabase
       .from(table)
-      .select("*")
+      .select(columns)
       .order(orderBy, { ascending })
       .range(from, from + PAGE_SIZE - 1);
 
@@ -56,15 +102,15 @@ async function fetchAllRows<T>(
 }
 
 export async function loadPatients() {
-  return fetchAllRows<Patient>("pacientes", "nome", true);
+  return fetchAllRows<Patient>("pacientes", "nome", PATIENT_COLUMNS, true);
 }
 
 export async function loadEntries() {
-  return fetchAllRows<Entry>("entradas", "data", false);
+  return fetchAllRows<Entry>("entradas", "data", ENTRY_COLUMNS, false);
 }
 
 export async function loadSchedules() {
-  return fetchAllRows<Schedule>("agendamentos", "data", true);
+  return fetchAllRows<Schedule>("agendamentos", "data", SCHEDULE_COLUMNS, true);
 }
 
 export async function loadClinicData() {
