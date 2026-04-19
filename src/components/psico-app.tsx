@@ -3,6 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 import {
   useMemo,
+  useRef,
   startTransition,
   useEffect,
   useEffectEvent,
@@ -58,6 +59,7 @@ export function PsicoApp() {
   const [selectedPatientRequest, setSelectedPatientRequest] =
     useState<PatientSelectionRequest | null>(null);
   const [sessionSeed, setSessionSeed] = useState<SessionSeed | null>(null);
+  const loadedUserIdRef = useRef<string | null>(null);
 
   const configured = hasSupabaseConfig();
   const calendarEvents = useMemo(
@@ -185,22 +187,31 @@ export function PsicoApp() {
     }
   }
 
-  const applySession = useEffectEvent(async (nextSession: Session | null) => {
+  const applySession = useEffectEvent(
+    async (nextSession: Session | null, forceRefresh = false) => {
     setSession(nextSession);
     setAuthError("");
     setAuthLoading(false);
 
     if (nextSession) {
+      const sameUserAlreadyLoaded = loadedUserIdRef.current === nextSession.user.id;
+      if (sameUserAlreadyLoaded && !forceRefresh) {
+        return;
+      }
+
       await refreshData();
+      loadedUserIdRef.current = nextSession.user.id;
       return;
     }
 
+    loadedUserIdRef.current = null;
     startTransition(() => {
       setPatients([]);
       setEntries([]);
       setSchedules([]);
     });
-  });
+    },
+  );
 
   useEffect(() => {
     if (!configured) {
@@ -219,8 +230,23 @@ export function PsicoApp() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      void applySession(nextSession);
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === "TOKEN_REFRESHED") {
+        void applySession(nextSession, false);
+        return;
+      }
+
+      if (event === "SIGNED_OUT") {
+        void applySession(null, true);
+        return;
+      }
+
+      if (event === "USER_UPDATED") {
+        void applySession(nextSession, true);
+        return;
+      }
+
+      void applySession(nextSession, false);
     });
 
     return () => {
