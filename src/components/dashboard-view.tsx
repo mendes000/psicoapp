@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 
 import type {
   ConsolidatedPatient,
@@ -38,10 +38,28 @@ export function DashboardView({
 }: DashboardViewProps) {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
-  const consolidated = consolidatePatients(patients, entries);
-  const visible = deferredSearch.trim()
-    ? consolidated.filter((patient) => matchesConsolidatedSearch(patient, deferredSearch))
-    : consolidated.slice(0, 20);
+  const consolidated = useMemo(
+    () => consolidatePatients(patients, entries),
+    [patients, entries],
+  );
+  const metrics = useMemo(
+    () => ({
+      totalSessoes: metricValue(consolidated, "totalSessoes"),
+      totalPago: metricValue(consolidated, "totalPago"),
+      saldo: metricValue(consolidated, "saldo"),
+    }),
+    [consolidated],
+  );
+  const visible = useMemo(() => {
+    const search = deferredSearch.trim();
+    if (!search) {
+      return consolidated.slice(0, 20);
+    }
+
+    return consolidated.filter((patient) =>
+      matchesConsolidatedSearch(patient, search),
+    );
+  }, [consolidated, deferredSearch]);
 
   return (
     <section className="layout-grid reveal">
@@ -52,15 +70,15 @@ export function DashboardView({
         </article>
         <article className="stat-card">
           <span>Sessoes registradas</span>
-          <strong>{metricValue(consolidated, "totalSessoes")}</strong>
+          <strong>{metrics.totalSessoes}</strong>
         </article>
         <article className="stat-card">
           <span>Total pago</span>
-          <strong>{formatCurrency(metricValue(consolidated, "totalPago"))}</strong>
+          <strong>{formatCurrency(metrics.totalPago)}</strong>
         </article>
         <article className="stat-card">
           <span>Saldo consolidado</span>
-          <strong>{formatCurrency(metricValue(consolidated, "saldo"))}</strong>
+          <strong>{formatCurrency(metrics.saldo)}</strong>
         </article>
       </div>
 

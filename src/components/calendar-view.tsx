@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { CalendarEvent } from "../lib/types";
 import {
@@ -32,13 +32,23 @@ export function CalendarView({
   const [anchor, setAnchor] = useState(new Date());
   const [defaultTime, setDefaultTime] = useState("09:00");
 
-  const eventsMap = new Map<string, CalendarEvent[]>();
-  for (const event of events) {
-    const key = toDateKey(event.startsAt);
-    const current = eventsMap.get(key) ?? [];
-    current.push(event);
-    eventsMap.set(key, current);
-  }
+  const eventsMap = useMemo(() => {
+    const nextMap = new Map<string, CalendarEvent[]>();
+
+    for (const event of events) {
+      const key = toDateKey(event.startsAt);
+      const current = nextMap.get(key) ?? [];
+      current.push(event);
+      nextMap.set(key, current);
+    }
+
+    for (const [key, current] of nextMap.entries()) {
+      current.sort((left, right) => left.startsAt.getTime() - right.startsAt.getTime());
+      nextMap.set(key, current);
+    }
+
+    return nextMap;
+  }, [events]);
 
   function move(offset: number) {
     if (mode === "Semanal") {
@@ -49,17 +59,25 @@ export function CalendarView({
     setAnchor((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
   }
 
-  const weekStart = startOfWeek(anchor);
-  const weekDays = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-  const monthBounds = monthGridBounds(anchor);
-  const monthDays: Date[] = [];
-  for (
-    let cursor = new Date(monthBounds.start);
-    cursor <= monthBounds.end;
-    cursor = addDays(cursor, 1)
-  ) {
-    monthDays.push(cursor);
-  }
+  const weekDays = useMemo(() => {
+    const weekStart = startOfWeek(anchor);
+    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  }, [anchor]);
+
+  const monthDays = useMemo(() => {
+    const monthBounds = monthGridBounds(anchor);
+    const days: Date[] = [];
+
+    for (
+      let cursor = new Date(monthBounds.start);
+      cursor <= monthBounds.end;
+      cursor = addDays(cursor, 1)
+    ) {
+      days.push(cursor);
+    }
+
+    return days;
+  }, [anchor]);
 
   const visibleDays = mode === "Semanal" ? weekDays : monthDays;
 
@@ -127,9 +145,7 @@ export function CalendarView({
       <div className="calendar-grid">
         {visibleDays.map((day) => {
           const key = toDateKey(day);
-          const dayEvents = (eventsMap.get(key) ?? []).sort(
-            (left, right) => left.startsAt.getTime() - right.startsAt.getTime(),
-          );
+          const dayEvents = eventsMap.get(key) ?? [];
           const isMuted = mode === "Mensal" && day.getMonth() !== anchor.getMonth();
 
           return (

@@ -55,11 +55,23 @@ async function fetchAllRows<T>(
   return records;
 }
 
+export async function loadPatients() {
+  return fetchAllRows<Patient>("pacientes", "nome", true);
+}
+
+export async function loadEntries() {
+  return fetchAllRows<Entry>("entradas", "data", false);
+}
+
+export async function loadSchedules() {
+  return fetchAllRows<Schedule>("agendamentos", "data", true);
+}
+
 export async function loadClinicData() {
   const [patients, entries, schedules] = await Promise.all([
-    fetchAllRows<Patient>("pacientes", "nome", true),
-    fetchAllRows<Entry>("entradas", "data", false),
-    fetchAllRows<Schedule>("agendamentos", "data", true),
+    loadPatients(),
+    loadEntries(),
+    loadSchedules(),
   ]);
 
   return { patients, entries, schedules };

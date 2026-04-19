@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import type {
   Entry,
@@ -50,13 +50,17 @@ export function SessionsView({
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
 
-  const patientNames = Array.from(
-    new Set(
-      patients
-        .map((patient) => String(patient.nome ?? "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right, "pt-BR"));
+  const patientNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          patients
+            .map((patient) => String(patient.nome ?? "").trim())
+            .filter(Boolean),
+        ),
+      ).sort((left, right) => left.localeCompare(right, "pt-BR")),
+    [patients],
+  );
 
   useEffect(() => {
     if (!seed) {
@@ -72,21 +76,36 @@ export function SessionsView({
     onSeedConsumed();
   }, [onSeedConsumed, seed]);
 
-  const filteredEntries = entries.filter((entry) => {
+  const filteredEntries = useMemo(() => {
     if (!deferredSearch.trim()) {
-      return true;
+      return entries;
     }
 
     const searchValue = deferredSearch.trim();
     const normalized = normalizeText(searchValue);
-    const name = normalizeText(entry.nome);
+    const lowered = searchValue.toLowerCase();
+
+    return entries.filter((entry) => {
+      const name = normalizeText(entry.nome);
+
+      return (
+        name.includes(normalized) ||
+        similarity(name, normalized) >= 0.72 ||
+        String(entry.obs ?? "").toLowerCase().includes(lowered)
+      );
+    });
+  }, [deferredSearch, entries]);
+
+  const ticketMedio = useMemo(() => {
+    if (entries.length === 0) {
+      return 0;
+    }
 
     return (
-      name.includes(normalized) ||
-      similarity(name, normalized) >= 0.72 ||
-      String(entry.obs ?? "").toLowerCase().includes(searchValue.toLowerCase())
+      entries.reduce((sum, entry) => sum + toNumber(entry.valor_pago), 0) /
+      entries.length
     );
-  });
+  }, [entries]);
 
   function prefillFromEntry(entry: Entry) {
     setForm(entryToSessionForm(entry));
@@ -422,10 +441,7 @@ export function SessionsView({
             </span>
             <span className="pill">
               Ticket medio:{" "}
-              {formatCurrency(
-                entries.reduce((sum, entry) => sum + toNumber(entry.valor_pago), 0) /
-                  Math.max(entries.length, 1),
-              )}
+              {formatCurrency(ticketMedio)}
             </span>
           </div>
         )}

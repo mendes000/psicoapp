@@ -2,6 +2,7 @@
 
 import type { Session } from "@supabase/supabase-js";
 import {
+  useMemo,
   startTransition,
   useEffect,
   useEffectEvent,
@@ -16,6 +17,9 @@ import { SessionsView } from "./sessions-view";
 import {
   createScheduleRecord,
   loadClinicData,
+  loadEntries,
+  loadPatients,
+  loadSchedules,
   saveSessionRecord,
   signOutSupabase,
   upsertPatientRecord,
@@ -56,8 +60,14 @@ export function PsicoApp() {
   const [sessionSeed, setSessionSeed] = useState<SessionSeed | null>(null);
 
   const configured = hasSupabaseConfig();
-  const calendarEvents = buildCalendarEvents(entries, schedules);
-  const patientColumns = collectPatientColumns(patients);
+  const calendarEvents = useMemo(
+    () => buildCalendarEvents(entries, schedules),
+    [entries, schedules],
+  );
+  const patientColumns = useMemo(
+    () => collectPatientColumns(patients),
+    [patients],
+  );
 
   useEffect(() => {
     if (!flash) {
@@ -89,6 +99,86 @@ export function PsicoApp() {
       setFlash({
         type: "error",
         text: error instanceof Error ? error.message : "Falha ao carregar os dados.",
+      });
+    } finally {
+      setDataLoading(false);
+    }
+  }
+
+  async function refreshPatients(message?: FlashMessage) {
+    if (!configured) {
+      return;
+    }
+
+    setDataLoading(true);
+
+    try {
+      const nextPatients = await loadPatients();
+      startTransition(() => {
+        setPatients(nextPatients);
+        if (message) {
+          setFlash(message);
+        }
+      });
+    } catch (error) {
+      setFlash({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao carregar pacientes.",
+      });
+    } finally {
+      setDataLoading(false);
+    }
+  }
+
+  async function refreshEntriesAndSchedules(message?: FlashMessage) {
+    if (!configured) {
+      return;
+    }
+
+    setDataLoading(true);
+
+    try {
+      const [nextEntries, nextSchedules] = await Promise.all([
+        loadEntries(),
+        loadSchedules(),
+      ]);
+
+      startTransition(() => {
+        setEntries(nextEntries);
+        setSchedules(nextSchedules);
+        if (message) {
+          setFlash(message);
+        }
+      });
+    } catch (error) {
+      setFlash({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao atualizar sessoes e agendamentos.",
+      });
+    } finally {
+      setDataLoading(false);
+    }
+  }
+
+  async function refreshSchedules(message?: FlashMessage) {
+    if (!configured) {
+      return;
+    }
+
+    setDataLoading(true);
+
+    try {
+      const nextSchedules = await loadSchedules();
+      startTransition(() => {
+        setSchedules(nextSchedules);
+        if (message) {
+          setFlash(message);
+        }
+      });
+    } catch (error) {
+      setFlash({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao carregar agendamentos.",
       });
     } finally {
       setDataLoading(false);
@@ -173,7 +263,7 @@ export function PsicoApp() {
         columns: patientColumns,
       });
       setSelectedPatientRequest(null);
-      await refreshData({
+      await refreshPatients({
         type: "success",
         text: existing ? `Paciente ${form.nome} atualizado.` : `Paciente ${form.nome} criado.`,
       });
@@ -193,7 +283,7 @@ export function PsicoApp() {
     try {
       const result = await createScheduleRecord(form, context);
       setSessionSeed(null);
-      await refreshData({
+      await refreshSchedules({
         type: "success",
         text: result.updated
           ? `Agendamento atualizado para ${form.nome} em ${formatDateTimeBr(`${form.data}T${form.hora}`)}.`
@@ -223,7 +313,7 @@ export function PsicoApp() {
       }
 
       setSessionSeed(null);
-      await refreshData({
+      await refreshEntriesAndSchedules({
         type: "success",
         text: context.entryId != null
           ? "Atendimento atualizado com sucesso."
@@ -333,10 +423,10 @@ export function PsicoApp() {
         <header className="topbar">
           <div className="headline">
             <div className="eyebrow">PsicoApp | Static Deploy Ready</div>
-            <h1>Gestao clinica sem Streamlit, com interface web e deploy direto.</h1>
+            <h1>Gestao clinica com interface web e deploy direto.</h1>
             <p>
-              O backend continua no Supabase. A camada de interface agora esta em
-              Next.js, com login, cadastro, sessoes e calendario em uma unica app.
+              O backend fica no Supabase. A interface em Next.js concentra login,
+              cadastro, sessoes e calendario em uma unica app.
             </p>
           </div>
 

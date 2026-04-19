@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import type {
   Patient,
@@ -52,36 +52,48 @@ export function PatientsView({
   const [cepFeedback, setCepFeedback] = useState("");
 
   const deferredSearch = useDeferredValue(search);
-  const allTreatments = uniqueTexts([
-    ...DEFAULT_TREATMENTS,
-    ...patients.flatMap((patient) => parseTreatments(patient.tratamento)),
-    ...parseTreatments(form.tratamento),
-  ]);
+  const allTreatments = useMemo(
+    () =>
+      uniqueTexts([
+        ...DEFAULT_TREATMENTS,
+        ...patients.flatMap((patient) => parseTreatments(patient.tratamento)),
+        ...parseTreatments(form.tratamento),
+      ]),
+    [form.tratamento, patients],
+  );
 
-  const availableOrigins = uniqueTexts([
-    ...DEFAULT_ORIGINS,
-    ...patients.map((patient) => patient.origem),
-    form.origem,
-  ]);
+  const availableOrigins = useMemo(
+    () =>
+      uniqueTexts([
+        ...DEFAULT_ORIGINS,
+        ...patients.map((patient) => patient.origem),
+        form.origem,
+      ]),
+    [form.origem, patients],
+  );
 
-  const filteredPatients = patients.filter((patient) => {
+  const filteredPatients = useMemo(() => {
     if (!deferredSearch.trim()) {
-      return true;
+      return patients;
     }
 
     const text = deferredSearch.trim();
     const key = normalizeText(text);
-    const name = normalizeText(patient.nome);
-    const email = String(patient.email ?? "").toLowerCase();
-    const cpf = String(patient.cpf ?? "").toLowerCase();
+    const lowered = text.toLowerCase();
 
-    return (
-      name.includes(key) ||
-      similarity(name, key) >= 0.72 ||
-      email.includes(text.toLowerCase()) ||
-      cpf.includes(text.toLowerCase())
-    );
-  });
+    return patients.filter((patient) => {
+      const name = normalizeText(patient.nome);
+      const email = String(patient.email ?? "").toLowerCase();
+      const cpf = String(patient.cpf ?? "").toLowerCase();
+
+      return (
+        name.includes(key) ||
+        similarity(name, key) >= 0.72 ||
+        email.includes(lowered) ||
+        cpf.includes(lowered)
+      );
+    });
+  }, [deferredSearch, patients]);
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -279,7 +291,7 @@ export function PatientsView({
           <div>
             <h2>{selectedKey === CREATE_NEW_KEY ? "Novo paciente" : "Editar paciente"}</h2>
             <p className="panel-subcopy">
-              Os campos seguem a mesma estrutura usada no Streamlit, mas agora em um formulario web.
+              Preencha os dados do cadastro em um formulario web unico.
             </p>
           </div>
         </div>

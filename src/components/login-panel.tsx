@@ -30,14 +30,14 @@ export function LoginPanel({ onSubmit, isBusy, error }: LoginPanelProps) {
       <div className="login-card shell-card reveal">
         <section className="login-copy">
           <div className="eyebrow">PsicoApp em Next.js</div>
-          <h1>Streamlit saiu de cena. O fluxo agora esta pronto para deploy estatico.</h1>
+          <h1>Painel clinico pronto para acesso web e deploy estatico.</h1>
           <p>
             O app foi redesenhado como uma interface web com Supabase Auth e
             operacao direta nas tabelas de pacientes, sessoes e agendamentos.
           </p>
           <ul>
             <li>Painel consolidado com busca por paciente, CPF e email.</li>
-            <li>Cadastro e edicao de pacientes sem depender de Streamlit.</li>
+            <li>Cadastro e edicao de pacientes em um unico fluxo web.</li>
             <li>Agenda semanal e mensal integrada ao lancamento de sessoes.</li>
           </ul>
         </section>
