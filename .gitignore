@@ -136,6 +136,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.local
 .envrc
 .venv
 env/
@@ -201,6 +202,18 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Node / Next.js
+node_modules/
+.next/
+.next-build/
+.vercel/
+out/
+*.tsbuildinfo
+
+# Local run logs
+streamlit.stdout.log
+streamlit.stderr.log
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
@@ -211,7 +224,5 @@ supabase/.temp/
 
 # Legacy/obsolete files kept only locally
 antigos/
-migrar_dados.py
-pages/corrigir_nome.py
-pages/tabelas.py
 supabase/migrations/20260221095500_create_pacientes_consolidados.sql
+legacy/streamlit/.streamlit/secrets.toml
