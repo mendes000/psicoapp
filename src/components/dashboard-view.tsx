@@ -245,10 +245,15 @@ export function DashboardView({
                       </div>
                     ) : (
                       <div className="session-list">
-                        {patient.ultimasSessoes.map((entry) => (
+                        {patient.ultimasSessoes.map((entry, index) => (
                           <article
                             className="session-row"
-                            key={`${patient.nomeKey}-${entry.id ?? entry.data}`}
+                            key={[
+                              patient.nomeKey,
+                              entry.id ?? "sem-id",
+                              entry.data ?? "sem-data",
+                              index,
+                            ].join("-")}
                           >
                             <div className="session-meta">
                               <strong>{formatDateTimeBr(entry.data)}</strong>

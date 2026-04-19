@@ -179,10 +179,16 @@ export function CalendarView({
                     : "Nenhum evento neste dia."}
                 </div>
               ) : (
-                dayEvents.map((event) => (
+                dayEvents.map((event, index) => (
                   <button
                     className={`calendar-event source-${event.source}`}
-                    key={`${event.source}-${event.id ?? event.data}-${event.nome}`}
+                    key={[
+                      event.source,
+                      event.id ?? "sem-id",
+                      event.data ?? "sem-data",
+                      event.nome ?? "sem-nome",
+                      index,
+                    ].join("-")}
                     type="button"
                     onClick={() => onOpenEvent(event)}
                   >

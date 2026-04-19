@@ -411,8 +411,15 @@ export function SessionsView({
                 </tr>
               </thead>
               <tbody>
-                {filteredEntries.map((entry) => (
-                  <tr key={String(entry.id ?? entry.data ?? entry.nome)}>
+                {filteredEntries.map((entry, index) => (
+                  <tr
+                    key={[
+                      entry.id ?? "sem-id",
+                      entry.data ?? "sem-data",
+                      entry.nome ?? "sem-nome",
+                      index,
+                    ].join("-")}
+                  >
                     <td>{formatDateTimeBr(entry.data)}</td>
                     <td>{entry.nome || "Sem nome"}</td>
                     <td>{entry.tipo || "Sem tipo"}</td>
