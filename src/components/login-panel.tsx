@@ -29,15 +29,15 @@ export function LoginPanel({ onSubmit, isBusy, error }: LoginPanelProps) {
     <div className="login-shell">
       <div className="login-card shell-card reveal">
         <section className="login-copy">
-          <div className="eyebrow">PsicoApp em Next.js</div>
-          <h1>Painel clinico pronto para acesso web e deploy estatico.</h1>
+          <div className="eyebrow">PsicoApp</div>
+          <h1>Painel clinico para atendimento, cadastro e agenda.</h1>
           <p>
-            O app foi redesenhado como uma interface web com Supabase Auth e
-            operacao direta nas tabelas de pacientes, sessoes e agendamentos.
+            Centralize pacientes, sessoes e agendamentos em uma interface unica,
+            com acesso seguro e operacao direta no Supabase.
           </p>
           <ul>
             <li>Painel consolidado com busca por paciente, CPF e email.</li>
-            <li>Cadastro e edicao de pacientes em um unico fluxo web.</li>
+            <li>Cadastro e edicao de pacientes em um fluxo simples.</li>
             <li>Agenda semanal e mensal integrada ao lancamento de sessoes.</li>
           </ul>
         </section>
@@ -47,7 +47,7 @@ export function LoginPanel({ onSubmit, isBusy, error }: LoginPanelProps) {
             <div>
               <h2>Entrar</h2>
               <p className="panel-subcopy">
-                Use as credenciais do Supabase Auth para abrir o sistema.
+                Use seu email e senha para acessar o sistema.
               </p>
             </div>
           </div>

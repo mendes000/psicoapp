@@ -3,7 +3,6 @@
 import type { Session } from "@supabase/supabase-js";
 import {
   useMemo,
-  useRef,
   startTransition,
   useEffect,
   useEffectEvent,
@@ -17,6 +16,7 @@ import { PatientsView } from "./patients-view";
 import { SessionsView } from "./sessions-view";
 import {
   createScheduleRecord,
+  loadClinicData,
   loadEntries,
   loadPatients,
   loadSchedules,
@@ -58,8 +58,6 @@ export function PsicoApp() {
   const [selectedPatientRequest, setSelectedPatientRequest] =
     useState<PatientSelectionRequest | null>(null);
   const [sessionSeed, setSessionSeed] = useState<SessionSeed | null>(null);
-  const lastSessionKeyRef = useRef<string | null>(null);
-  const schedulesLoadedRef = useRef(false);
 
   const configured = hasSupabaseConfig();
   const calendarEvents = useMemo(
@@ -80,7 +78,7 @@ export function PsicoApp() {
     return () => window.clearTimeout(timer);
   }, [flash]);
 
-  async function refreshCoreData(message?: FlashMessage) {
+  async function refreshData(message?: FlashMessage) {
     if (!configured) {
       return;
     }
@@ -88,13 +86,11 @@ export function PsicoApp() {
     setDataLoading(true);
 
     try {
-      const [nextPatients, nextEntries] = await Promise.all([
-        loadPatients(),
-        loadEntries(),
-      ]);
+      const result = await loadClinicData();
       startTransition(() => {
-        setPatients(nextPatients);
-        setEntries(nextEntries);
+        setPatients(result.patients);
+        setEntries(result.entries);
+        setSchedules(result.schedules);
         if (message) {
           setFlash(message);
         }
@@ -102,7 +98,7 @@ export function PsicoApp() {
     } catch (error) {
       setFlash({
         type: "error",
-        text: error instanceof Error ? error.message : "Falha ao carregar os dados principais.",
+        text: error instanceof Error ? error.message : "Falha ao carregar os dados.",
       });
     } finally {
       setDataLoading(false);
@@ -173,7 +169,6 @@ export function PsicoApp() {
 
     try {
       const nextSchedules = await loadSchedules();
-      schedulesLoadedRef.current = true;
       startTransition(() => {
         setSchedules(nextSchedules);
         if (message) {
@@ -190,36 +185,16 @@ export function PsicoApp() {
     }
   }
 
-  async function ensureSchedulesLoaded() {
-    if (!configured || schedulesLoadedRef.current) {
-      return;
-    }
-
-    await refreshSchedules();
-  }
-
   const applySession = useEffectEvent(async (nextSession: Session | null) => {
     setSession(nextSession);
     setAuthError("");
     setAuthLoading(false);
 
     if (nextSession) {
-      const sessionKey = `${nextSession.user.id}:${nextSession.access_token}`;
-      if (lastSessionKeyRef.current === sessionKey) {
-        return;
-      }
-
-      lastSessionKeyRef.current = sessionKey;
-      schedulesLoadedRef.current = false;
-      startTransition(() => {
-        setSchedules([]);
-      });
-      await refreshCoreData();
+      await refreshData();
       return;
     }
 
-    lastSessionKeyRef.current = null;
-    schedulesLoadedRef.current = false;
     startTransition(() => {
       setPatients([]);
       setEntries([]);
@@ -252,12 +227,6 @@ export function PsicoApp() {
       subscription.unsubscribe();
     };
   }, [applySession, configured]);
-
-  useEffect(() => {
-    if (activeView === "calendario") {
-      void ensureSchedulesLoaded();
-    }
-  }, [activeView]);
 
   async function signIn(email: string, password: string) {
     if (!configured) {
@@ -496,11 +465,7 @@ export function PsicoApp() {
           <div className="status-row">
             <span className="pill">{patients.length} pacientes carregados</span>
             <span className="pill">{entries.length} sessoes carregadas</span>
-            <span className="pill">
-              {schedulesLoadedRef.current
-                ? `${schedules.length} agendamentos carregados`
-                : "agendamentos sob demanda"}
-            </span>
+            <span className="pill">{schedules.length} agendamentos carregados</span>
           </div>
 
           {activeView === "painel" && (

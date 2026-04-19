@@ -15,7 +15,7 @@ const displayFont = Fraunces({
 
 export const metadata: Metadata = {
   title: "PsicoApp",
-  description: "Painel clinico em Next.js com Supabase, pronto para deploy estatico.",
+  description: "Painel clinico com pacientes, sessoes e agenda integrado ao Supabase.",
 };
 
 export default function RootLayout({
