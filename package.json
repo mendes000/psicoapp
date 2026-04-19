@@ -1,14 +1,14 @@
 {
   "name": "psicoapp",
   "version": "1.0.0",
-  "description": "PsicoApp web em Next.js + Supabase, pronto para deploy na Vercel.",
+  "description": "PsicoApp web em Next.js + Supabase, pronto para deploy estatico.",
   "private": true,
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/prepare-static-deploy.mjs",
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },

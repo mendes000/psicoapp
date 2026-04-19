@@ -209,6 +209,8 @@ node_modules/
 .vercel/
 out/
 *.tsbuildinfo
+cloudflare-upload/
+cloudflare-upload.zip
 
 # Local run logs
 streamlit.stdout.log

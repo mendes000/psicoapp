@@ -299,10 +299,10 @@ export function PsicoApp() {
         <div className="login-card shell-card">
           <section className="login-copy">
             <div className="eyebrow">Configuracao pendente</div>
-            <h1>Configure o Supabase antes de publicar na Vercel.</h1>
+            <h1>Configure o Supabase antes de publicar o app.</h1>
             <p>
               Defina `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-              no ambiente local e no painel da Vercel.
+              no ambiente local e no provedor onde o site sera publicado.
             </p>
           </section>
 
@@ -332,7 +332,7 @@ export function PsicoApp() {
       <div className="shell-card app-frame">
         <header className="topbar">
           <div className="headline">
-            <div className="eyebrow">PsicoApp | Vercel Ready</div>
+            <div className="eyebrow">PsicoApp | Static Deploy Ready</div>
             <h1>Gestao clinica sem Streamlit, com interface web e deploy direto.</h1>
             <p>
               O backend continua no Supabase. A camada de interface agora esta em

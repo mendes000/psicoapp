@@ -1,6 +1,6 @@
 # Supabase Go-Live
 
-Checklist objetivo para publicar o `psicoapp` na Vercel com o banco protegido.
+Checklist objetivo para publicar o `psicoapp` com o banco protegido.
 
 ## O que o app web faz hoje
 
