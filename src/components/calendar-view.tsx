@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { CalendarEvent } from "@/lib/types";
+import type { CalendarEvent } from "../lib/types";
 import {
   addDays,
   formatCurrency,
@@ -13,7 +13,7 @@ import {
   toDateKey,
   toInputDateValue,
   toInputTimeValue,
-} from "@/lib/utils";
+} from "../lib/utils";
 
 type CalendarMode = "Semanal" | "Mensal";
 

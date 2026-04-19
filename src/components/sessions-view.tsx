@@ -8,7 +8,7 @@ import type {
   SessionEditorContext,
   SessionFormValues,
   SessionSeed,
-} from "@/lib/types";
+} from "../lib/types";
 import {
   emptySessionForm,
   entryToSessionForm,
@@ -19,7 +19,7 @@ import {
   similarity,
   toInputTimeValue,
   toNumber,
-} from "@/lib/utils";
+} from "../lib/utils";
 
 interface SessionsViewProps {
   patients: Patient[];

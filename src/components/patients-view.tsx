@@ -7,7 +7,7 @@ import type {
   PatientColumnMap,
   PatientFormValues,
   PatientSelectionRequest,
-} from "@/lib/types";
+} from "../lib/types";
 import {
   DEFAULT_ORIGINS,
   DEFAULT_TREATMENTS,
@@ -22,7 +22,7 @@ import {
   serializeTreatments,
   similarity,
   uniqueTexts,
-} from "@/lib/utils";
+} from "../lib/utils";
 
 const CREATE_NEW_KEY = "__new__";
 

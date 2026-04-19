@@ -8,19 +8,19 @@ import {
   useState,
 } from "react";
 
-import { CalendarView } from "@/components/calendar-view";
-import { DashboardView } from "@/components/dashboard-view";
-import { LoginPanel } from "@/components/login-panel";
-import { PatientsView } from "@/components/patients-view";
-import { SessionsView } from "@/components/sessions-view";
+import { CalendarView } from "./calendar-view";
+import { DashboardView } from "./dashboard-view";
+import { LoginPanel } from "./login-panel";
+import { PatientsView } from "./patients-view";
+import { SessionsView } from "./sessions-view";
 import {
   createScheduleRecord,
   loadClinicData,
   saveSessionRecord,
   signOutSupabase,
   upsertPatientRecord,
-} from "@/lib/data";
-import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase";
+} from "../lib/data";
+import { getSupabaseBrowserClient, hasSupabaseConfig } from "../lib/supabase";
 import type {
   AppView,
   CalendarEvent,
@@ -32,14 +32,14 @@ import type {
   SessionEditorContext,
   SessionFormValues,
   SessionSeed,
-} from "@/lib/types";
+} from "../lib/types";
 import {
   buildCalendarEvents,
   collectPatientColumns,
   emptySessionForm,
   entryToSessionForm,
   formatDateTimeBr,
-} from "@/lib/utils";
+} from "../lib/utils";
 
 export function PsicoApp() {
   const [session, setSession] = useState<Session | null>(null);

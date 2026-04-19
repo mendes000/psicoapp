@@ -6,7 +6,7 @@ import type {
   ConsolidatedPatient,
   Entry,
   Patient,
-} from "@/lib/types";
+} from "../lib/types";
 import {
   calculateAge,
   consolidatePatients,
@@ -15,7 +15,7 @@ import {
   formatDateTimeBr,
   matchesConsolidatedSearch,
   toNumber,
-} from "@/lib/utils";
+} from "../lib/utils";
 
 interface DashboardViewProps {
   patients: Patient[];
