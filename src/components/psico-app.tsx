@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 
+import { AppLogo } from "./app-logo";
 import { CalendarView } from "./calendar-view";
 import { DashboardView } from "./dashboard-view";
 import { LoginPanel } from "./login-panel";
@@ -17,7 +18,7 @@ import { PatientsView } from "./patients-view";
 import { SessionsView } from "./sessions-view";
 import {
   createScheduleRecord,
-  loadClinicData,
+  loadDashboardSnapshot,
   loadEntries,
   loadPatients,
   loadSchedules,
@@ -29,6 +30,7 @@ import { getSupabaseBrowserClient, hasSupabaseConfig } from "../lib/supabase";
 import type {
   AppView,
   CalendarEvent,
+  DashboardSnapshot,
   Entry,
   FlashMessage,
   Patient,
@@ -46,22 +48,59 @@ import {
   formatDateTimeBr,
 } from "../lib/utils";
 
+const NEW_PATIENT_REQUEST_KEY = "__new__";
+const CLINIC_CACHE_KEY_PREFIX = "psicoapp:clinic-cache:";
+type LoadStatus = "idle" | "loading" | "ready" | "error";
+type DatasetKey = "patients" | "entries" | "schedules" | "dashboard";
+
 export function PsicoApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
-  const [dataLoading, setDataLoading] = useState(false);
+  const [dataLoadCount, setDataLoadCount] = useState(0);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [dashboardSnapshot, setDashboardSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [dashboardStatus, setDashboardStatus] = useState<LoadStatus>("idle");
+  const [patientsStatus, setPatientsStatus] = useState<LoadStatus>("idle");
+  const [entriesStatus, setEntriesStatus] = useState<LoadStatus>("idle");
+  const [schedulesStatus, setSchedulesStatus] = useState<LoadStatus>("idle");
+  const [initialLoadState, setInitialLoadState] = useState<"pending" | "ready" | "error">("pending");
+  const [syncIssue, setSyncIssue] = useState("");
   const [activeView, setActiveView] = useState<AppView>("painel");
   const [flash, setFlash] = useState<FlashMessage | null>(null);
   const [selectedPatientRequest, setSelectedPatientRequest] =
     useState<PatientSelectionRequest | null>(null);
   const [sessionSeed, setSessionSeed] = useState<SessionSeed | null>(null);
   const loadedUserIdRef = useRef<string | null>(null);
+  const pendingLoadsRef = useRef(0);
 
   const configured = hasSupabaseConfig();
+  const dataLoading = dataLoadCount > 0;
+  const sessionUserId = session?.user.id ?? null;
+  const isPanelReady = dashboardStatus === "ready";
+  const isPatientsReady = patientsStatus === "ready";
+  const isSessionsReady =
+    patientsStatus === "ready" &&
+    entriesStatus === "ready" &&
+    schedulesStatus === "ready";
+  const isCalendarReady =
+    entriesStatus === "ready" &&
+    schedulesStatus === "ready";
+  const panelHasVisibleData = (dashboardSnapshot?.items.length ?? 0) > 0;
+  const patientsHasVisibleData = patients.length > 0;
+  const sessionsHasVisibleData =
+    patients.length > 0 || entries.length > 0 || schedules.length > 0;
+  const calendarHasVisibleData = entries.length > 0 || schedules.length > 0;
+  const currentViewHasVisibleData =
+    activeView === "painel"
+      ? panelHasVisibleData
+      : activeView === "pacientes"
+        ? patientsHasVisibleData
+        : activeView === "sessoes"
+          ? sessionsHasVisibleData
+          : calendarHasVisibleData;
   const calendarEvents = useMemo(
     () => buildCalendarEvents(entries, schedules),
     [entries, schedules],
@@ -80,136 +119,520 @@ export function PsicoApp() {
     return () => window.clearTimeout(timer);
   }, [flash]);
 
-  async function refreshData(message?: FlashMessage) {
-    if (!configured) {
+  function startDataTask() {
+    pendingLoadsRef.current += 1;
+    setDataLoadCount(pendingLoadsRef.current);
+  }
+
+  function finishDataTask() {
+    pendingLoadsRef.current = Math.max(0, pendingLoadsRef.current - 1);
+    setDataLoadCount(pendingLoadsRef.current);
+  }
+
+  async function withDataTask<T>(operation: () => Promise<T>) {
+    startDataTask();
+
+    try {
+      return await operation();
+    } finally {
+      finishDataTask();
+    }
+  }
+
+  function getClinicCacheKey(userId: string, dataset: DatasetKey) {
+    return `${CLINIC_CACHE_KEY_PREFIX}${userId}:${dataset}`;
+  }
+
+  function readCacheValue<T>(userId: string, dataset: DatasetKey): T | null {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    try {
+      const raw = window.sessionStorage.getItem(getClinicCacheKey(userId, dataset));
+      if (!raw) {
+        return null;
+      }
+
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  function readDatasetCache<T>(userId: string, dataset: DatasetKey): T[] | null {
+    const cached = readCacheValue<unknown>(userId, dataset);
+    return Array.isArray(cached) ? (cached as T[]) : null;
+  }
+
+  function persistCacheValue<T>(userId: string, dataset: DatasetKey, value: T) {
+    if (typeof window === "undefined") {
       return;
     }
 
-    setDataLoading(true);
-
     try {
-      const result = await loadClinicData();
-      startTransition(() => {
-        setPatients(result.patients);
-        setEntries(result.entries);
-        setSchedules(result.schedules);
-        if (message) {
-          setFlash(message);
-        }
-      });
-    } catch (error) {
-      setFlash({
-        type: "error",
-        text: error instanceof Error ? error.message : "Falha ao carregar os dados.",
-      });
-    } finally {
-      setDataLoading(false);
+      window.sessionStorage.setItem(
+        getClinicCacheKey(userId, dataset),
+        JSON.stringify(value),
+      );
+    } catch {
+      // Ignore cache write failures and keep the live data flow running.
     }
+  }
+
+  function persistDatasetCache<T>(userId: string, dataset: DatasetKey, records: T[]) {
+    persistCacheValue(userId, dataset, records);
+  }
+
+  async function waitForRetry(delayMs: number) {
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+  }
+
+  async function loadWithRetry<T>(loader: () => Promise<T>, retries = 1) {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await loader();
+      } catch (error) {
+        lastError = error;
+
+        if (attempt < retries) {
+          await waitForRetry(450 * (attempt + 1));
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  function applyPatients(nextPatients: Patient[], message?: FlashMessage) {
+    startTransition(() => {
+      setPatients(nextPatients);
+      if (message) {
+        setFlash(message);
+      }
+    });
+  }
+
+  function applyEntries(nextEntries: Entry[], message?: FlashMessage) {
+    startTransition(() => {
+      setEntries(nextEntries);
+      if (message) {
+        setFlash(message);
+      }
+    });
+  }
+
+  function applySchedules(nextSchedules: Schedule[], message?: FlashMessage) {
+    startTransition(() => {
+      setSchedules(nextSchedules);
+      if (message) {
+        setFlash(message);
+      }
+    });
+  }
+
+  function applyDashboardSnapshot(nextSnapshot: DashboardSnapshot, message?: FlashMessage) {
+    startTransition(() => {
+      setDashboardSnapshot(nextSnapshot);
+      if (message) {
+        setFlash(message);
+      }
+    });
+  }
+
+  async function ensureDashboardLoaded(options?: {
+    force?: boolean;
+    message?: FlashMessage;
+    userId?: string;
+    search?: string;
+    reviewOnly?: boolean;
+    itemLimit?: number;
+  }) {
+    if (!configured) {
+      return false;
+    }
+
+    const search = String(options?.search ?? "").trim();
+    const reviewOnly = options?.reviewOnly ?? false;
+    const itemLimit = options?.itemLimit ?? 20;
+    const isDefaultQuery = !search && !reviewOnly && itemLimit === 20;
+
+    if (isDefaultQuery && dashboardStatus === "ready" && !options?.force) {
+      return true;
+    }
+
+    if (isDefaultQuery && dashboardStatus === "loading" && !options?.force) {
+      return false;
+    }
+
+    const hadUsableData = isDefaultQuery && dashboardStatus === "ready";
+
+    if (isDefaultQuery) {
+      setDashboardStatus("loading");
+    }
+
+    return await withDataTask(async () => {
+      try {
+        const result = await loadWithRetry(
+          () =>
+            loadDashboardSnapshot({
+              search,
+              reviewOnly,
+              itemLimit,
+            }),
+          1,
+        );
+
+        if (isDefaultQuery) {
+          applyDashboardSnapshot(result, options?.message);
+          if (options?.userId) {
+            persistCacheValue(options.userId, "dashboard", result);
+          }
+          setDashboardStatus("ready");
+        }
+
+        setSyncIssue("");
+        return true;
+      } catch (error) {
+        setSyncIssue(
+          error instanceof Error ? error.message : "Falha ao carregar o painel.",
+        );
+
+        if (isDefaultQuery) {
+          setDashboardStatus(hadUsableData ? "ready" : "error");
+        }
+
+        return false;
+      }
+    });
+  }
+
+  async function ensurePatientsLoaded(options?: {
+    force?: boolean;
+    message?: FlashMessage;
+    userId?: string;
+  }) {
+    if (!configured) {
+      return false;
+    }
+
+    if (patientsStatus === "ready" && !options?.force) {
+      return true;
+    }
+
+    if (patientsStatus === "loading" && !options?.force) {
+      return false;
+    }
+
+    const hadUsableData = patientsStatus === "ready";
+    setPatientsStatus("loading");
+
+    return await withDataTask(async () => {
+      try {
+        const result = await loadWithRetry(loadPatients, 1);
+        applyPatients(result, options?.message);
+        if (options?.userId) {
+          persistDatasetCache(options.userId, "patients", result);
+        }
+        setSyncIssue("");
+        setPatientsStatus("ready");
+        return true;
+      } catch (error) {
+        setSyncIssue(
+          error instanceof Error ? error.message : "Falha ao carregar pacientes.",
+        );
+        setPatientsStatus(hadUsableData ? "ready" : "error");
+        return false;
+      }
+    });
+  }
+
+  async function ensureEntriesLoaded(options?: {
+    force?: boolean;
+    message?: FlashMessage;
+    userId?: string;
+  }) {
+    if (!configured) {
+      return false;
+    }
+
+    if (entriesStatus === "ready" && !options?.force) {
+      return true;
+    }
+
+    if (entriesStatus === "loading" && !options?.force) {
+      return false;
+    }
+
+    const hadUsableData = entriesStatus === "ready";
+    setEntriesStatus("loading");
+
+    return await withDataTask(async () => {
+      try {
+        const result = await loadWithRetry(loadEntries, 1);
+        applyEntries(result, options?.message);
+        if (options?.userId) {
+          persistDatasetCache(options.userId, "entries", result);
+        }
+        setSyncIssue("");
+        setEntriesStatus("ready");
+        return true;
+      } catch (error) {
+        setSyncIssue(
+          error instanceof Error ? error.message : "Falha ao carregar sessoes.",
+        );
+        setEntriesStatus(hadUsableData ? "ready" : "error");
+        return false;
+      }
+    });
+  }
+
+  async function ensureSchedulesLoaded(options?: {
+    force?: boolean;
+    message?: FlashMessage;
+    userId?: string;
+  }) {
+    if (!configured) {
+      return false;
+    }
+
+    if (schedulesStatus === "ready" && !options?.force) {
+      return true;
+    }
+
+    if (schedulesStatus === "loading" && !options?.force) {
+      return false;
+    }
+
+    const hadUsableData = schedulesStatus === "ready";
+    setSchedulesStatus("loading");
+
+    return await withDataTask(async () => {
+      try {
+        const result = await loadWithRetry(loadSchedules, 1);
+        applySchedules(result, options?.message);
+        if (options?.userId) {
+          persistDatasetCache(options.userId, "schedules", result);
+        }
+        setSyncIssue("");
+        setSchedulesStatus("ready");
+        return true;
+      } catch (error) {
+        setSyncIssue(
+          error instanceof Error ? error.message : "Falha ao carregar agendamentos.",
+        );
+        setSchedulesStatus(hadUsableData ? "ready" : "error");
+        return false;
+      }
+    });
   }
 
   async function refreshPatients(message?: FlashMessage) {
-    if (!configured) {
-      return;
-    }
+    const [patientsOk, dashboardOk] = await Promise.all([
+      ensurePatientsLoaded({
+        force: true,
+        message,
+        userId: loadedUserIdRef.current ?? undefined,
+      }),
+      ensureDashboardLoaded({
+        force: true,
+        userId: loadedUserIdRef.current ?? undefined,
+      }),
+    ]);
 
-    setDataLoading(true);
+    return patientsOk && dashboardOk;
+  }
 
-    try {
-      const nextPatients = await loadPatients();
-      startTransition(() => {
-        setPatients(nextPatients);
-        if (message) {
-          setFlash(message);
-        }
-      });
-    } catch (error) {
-      setFlash({
-        type: "error",
-        text: error instanceof Error ? error.message : "Falha ao carregar pacientes.",
-      });
-    } finally {
-      setDataLoading(false);
-    }
+  async function refreshDashboard(message?: FlashMessage) {
+    return ensureDashboardLoaded({
+      force: true,
+      message,
+      userId: loadedUserIdRef.current ?? undefined,
+    });
   }
 
   async function refreshEntriesAndSchedules(message?: FlashMessage) {
-    if (!configured) {
-      return;
-    }
+    const [entriesOk, schedulesOk, dashboardOk] = await Promise.all([
+      ensureEntriesLoaded({
+        force: true,
+        message,
+        userId: loadedUserIdRef.current ?? undefined,
+      }),
+      ensureSchedulesLoaded({
+        force: true,
+        userId: loadedUserIdRef.current ?? undefined,
+      }),
+      ensureDashboardLoaded({
+        force: true,
+        userId: loadedUserIdRef.current ?? undefined,
+      }),
+    ]);
 
-    setDataLoading(true);
-
-    try {
-      const [nextEntries, nextSchedules] = await Promise.all([
-        loadEntries(),
-        loadSchedules(),
-      ]);
-
-      startTransition(() => {
-        setEntries(nextEntries);
-        setSchedules(nextSchedules);
-        if (message) {
-          setFlash(message);
-        }
-      });
-    } catch (error) {
-      setFlash({
-        type: "error",
-        text: error instanceof Error ? error.message : "Falha ao atualizar sessoes e agendamentos.",
-      });
-    } finally {
-      setDataLoading(false);
-    }
+    return entriesOk && schedulesOk && dashboardOk;
   }
 
   async function refreshSchedules(message?: FlashMessage) {
-    if (!configured) {
+    return ensureSchedulesLoaded({
+      force: true,
+      message,
+      userId: loadedUserIdRef.current ?? undefined,
+    });
+  }
+
+  function currentViewLoadingCopy(view: AppView) {
+    switch (view) {
+      case "pacientes":
+        return "Sincronizando os cadastros antes de abrir a tela.";
+      case "sessoes":
+        return "Sincronizando pacientes, sessoes e agenda antes de abrir a tela.";
+      case "calendario":
+        return "Sincronizando sessoes e agendamentos antes de abrir a agenda.";
+      case "painel":
+      default:
+        return "Sincronizando o resumo clinico antes de abrir o painel.";
+    }
+  }
+
+  function currentViewFailureCopy(view: AppView) {
+    switch (view) {
+      case "pacientes":
+        return "Nao foi possivel concluir a carga dos cadastros agora.";
+      case "sessoes":
+        return "Nao foi possivel concluir a carga das sessoes agora.";
+      case "calendario":
+        return "Nao foi possivel concluir a carga da agenda agora.";
+      case "painel":
+      default:
+        return "Nao foi possivel concluir a carga inicial do painel agora.";
+    }
+  }
+
+  function datasetPillText(
+    count: number,
+    status: LoadStatus,
+    readyLabel: string,
+    loadingLabel: string,
+    idleLabel: string,
+  ) {
+    if (status === "ready") {
+      return readyLabel.replace("{count}", String(count));
+    }
+
+    if (status === "loading") {
+      return loadingLabel;
+    }
+
+    if (status === "error" && count > 0) {
+      return readyLabel.replace("{count}", String(count));
+    }
+
+    return idleLabel;
+  }
+
+  async function retryCurrentView() {
+    if (!sessionUserId) {
       return;
     }
 
-    setDataLoading(true);
-
-    try {
-      const nextSchedules = await loadSchedules();
-      startTransition(() => {
-        setSchedules(nextSchedules);
-        if (message) {
-          setFlash(message);
-        }
-      });
-    } catch (error) {
-      setFlash({
-        type: "error",
-        text: error instanceof Error ? error.message : "Falha ao carregar agendamentos.",
-      });
-    } finally {
-      setDataLoading(false);
+    if (activeView === "painel") {
+      await ensureDashboardLoaded({ userId: sessionUserId, force: true });
+      return;
     }
+
+    if (activeView === "pacientes") {
+      await ensurePatientsLoaded({ userId: sessionUserId, force: true });
+      return;
+    }
+
+    if (activeView === "sessoes") {
+      await Promise.all([
+        ensurePatientsLoaded({ userId: sessionUserId, force: true }),
+        ensureEntriesLoaded({ userId: sessionUserId, force: true }),
+        ensureSchedulesLoaded({ userId: sessionUserId, force: true }),
+      ]);
+      return;
+    }
+
+    await Promise.all([
+      ensureEntriesLoaded({ userId: sessionUserId, force: true }),
+      ensureSchedulesLoaded({ userId: sessionUserId, force: true }),
+    ]);
   }
 
   const applySession = useEffectEvent(
     async (nextSession: Session | null, forceRefresh = false) => {
-    setSession(nextSession);
-    setAuthError("");
-    setAuthLoading(false);
+      setSession(nextSession);
+      setAuthError("");
+      setAuthLoading(false);
 
-    if (nextSession) {
-      const sameUserAlreadyLoaded = loadedUserIdRef.current === nextSession.user.id;
-      if (sameUserAlreadyLoaded && !forceRefresh) {
+      if (nextSession) {
+        const sameUserAlreadyLoaded = loadedUserIdRef.current === nextSession.user.id;
+        if (sameUserAlreadyLoaded && !forceRefresh) {
+          return;
+        }
+
+        loadedUserIdRef.current = nextSession.user.id;
+        setSyncIssue("");
+
+        const cachedDashboard = readCacheValue<DashboardSnapshot>(
+          nextSession.user.id,
+          "dashboard",
+        );
+        const cachedPatients = readDatasetCache<Patient>(nextSession.user.id, "patients");
+        const cachedEntries = readDatasetCache<Entry>(nextSession.user.id, "entries");
+        const cachedSchedules = readDatasetCache<Schedule>(nextSession.user.id, "schedules");
+
+        if (cachedDashboard) {
+          applyDashboardSnapshot(cachedDashboard);
+          setDashboardStatus("ready");
+        } else {
+          setDashboardStatus("idle");
+        }
+
+        if (cachedPatients) {
+          applyPatients(cachedPatients);
+          setPatientsStatus("ready");
+        } else {
+          setPatientsStatus("idle");
+        }
+
+        if (cachedEntries) {
+          applyEntries(cachedEntries);
+          setEntriesStatus("ready");
+        } else {
+          setEntriesStatus("idle");
+        }
+
+        if (cachedSchedules) {
+          applySchedules(cachedSchedules);
+          setSchedulesStatus("ready");
+        } else {
+          setSchedulesStatus("idle");
+        }
+
+        setInitialLoadState("pending");
+        await ensureDashboardLoaded({
+          userId: nextSession.user.id,
+          force: forceRefresh,
+        });
         return;
       }
 
-      await refreshData();
-      loadedUserIdRef.current = nextSession.user.id;
-      return;
-    }
-
-    loadedUserIdRef.current = null;
-    startTransition(() => {
-      setPatients([]);
-      setEntries([]);
-      setSchedules([]);
-    });
+      loadedUserIdRef.current = null;
+      setInitialLoadState("pending");
+      setSyncIssue("");
+      setDashboardSnapshot(null);
+      setDashboardStatus("idle");
+      setPatientsStatus("idle");
+      setEntriesStatus("idle");
+      setSchedulesStatus("idle");
+      startTransition(() => {
+        setPatients([]);
+        setEntries([]);
+        setSchedules([]);
+      });
     },
   );
 
@@ -252,7 +675,122 @@ export function PsicoApp() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [applySession, configured]);
+  }, [configured]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    const userId = session.user.id;
+
+    if (activeView === "painel") {
+      void ensureDashboardLoaded({ userId });
+      return;
+    }
+
+    if (activeView === "pacientes") {
+      void ensurePatientsLoaded({ userId });
+      return;
+    }
+
+    if (activeView === "sessoes") {
+      void Promise.all([
+        ensurePatientsLoaded({ userId }),
+        ensureEntriesLoaded({ userId }),
+        ensureSchedulesLoaded({ userId }),
+      ]);
+      return;
+    }
+
+    if (activeView === "calendario") {
+      void Promise.all([
+        ensureEntriesLoaded({ userId }),
+        ensureSchedulesLoaded({ userId }),
+      ]);
+    }
+  }, [activeView, sessionUserId]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    if (activeView === "painel") {
+      if (isPanelReady) {
+        setInitialLoadState("ready");
+        return;
+      }
+
+      if (dashboardStatus === "error" && !panelHasVisibleData) {
+        setInitialLoadState("error");
+        return;
+      }
+
+      setInitialLoadState("pending");
+      return;
+    }
+
+    if (activeView === "pacientes") {
+      if (isPatientsReady) {
+        setInitialLoadState("ready");
+        return;
+      }
+
+      if (patientsStatus === "error" && !patientsHasVisibleData) {
+        setInitialLoadState("error");
+        return;
+      }
+
+      setInitialLoadState("pending");
+      return;
+    }
+
+    if (activeView === "sessoes") {
+      if (isSessionsReady) {
+        setInitialLoadState("ready");
+        return;
+      }
+
+      if (
+        (patientsStatus === "error" || entriesStatus === "error" || schedulesStatus === "error") &&
+        !sessionsHasVisibleData
+      ) {
+        setInitialLoadState("error");
+        return;
+      }
+
+      setInitialLoadState("pending");
+      return;
+    }
+
+    if (isCalendarReady) {
+      setInitialLoadState("ready");
+      return;
+    }
+
+    if ((entriesStatus === "error" || schedulesStatus === "error") && !calendarHasVisibleData) {
+      setInitialLoadState("error");
+      return;
+    }
+
+    setInitialLoadState("pending");
+  }, [
+    activeView,
+    calendarHasVisibleData,
+    dashboardStatus,
+    entriesStatus,
+    isCalendarReady,
+    isPanelReady,
+    isPatientsReady,
+    isSessionsReady,
+    panelHasVisibleData,
+    patientsStatus,
+    patientsHasVisibleData,
+    schedulesStatus,
+    session,
+    sessionsHasVisibleData,
+  ]);
 
   async function signIn(email: string, password: string) {
     if (!configured) {
@@ -289,6 +827,7 @@ export function PsicoApp() {
         columns: patientColumns,
       });
       setSelectedPatientRequest(null);
+      setSyncIssue("");
       await refreshPatients({
         type: "success",
         text: existing ? `Paciente ${form.nome} atualizado.` : `Paciente ${form.nome} criado.`,
@@ -359,15 +898,29 @@ export function PsicoApp() {
     setSessionSeed(null);
     setSelectedPatientRequest({
       key,
-      requestedAt: Date.now(),
     });
     setActiveView("pacientes");
+  }
+
+  function requestNewPatient() {
+    setSessionSeed(null);
+    setSelectedPatientRequest({
+      key: NEW_PATIENT_REQUEST_KEY,
+    });
+    setActiveView("pacientes");
+  }
+
+  function requestNewSession() {
+    setSelectedPatientRequest(null);
+    setSessionSeed({
+      form: emptySessionForm(),
+    });
+    setActiveView("sessoes");
   }
 
   function requestNewSessionForPatient(name: string) {
     setSelectedPatientRequest(null);
     setSessionSeed({
-      requestedAt: Date.now(),
       form: emptySessionForm({
         nome: name,
       }),
@@ -378,7 +931,6 @@ export function PsicoApp() {
   function requestSessionAt(date: string, time: string) {
     setSelectedPatientRequest(null);
     setSessionSeed({
-      requestedAt: Date.now(),
       form: emptySessionForm({
         data: date,
         hora: time,
@@ -390,13 +942,11 @@ export function PsicoApp() {
   function requestEventEdition(event: CalendarEvent) {
     setSelectedPatientRequest(null);
     setSessionSeed({
-      requestedAt: Date.now(),
       form: entryToSessionForm(event),
       context:
         event.source === "entrada"
           ? { entryId: event.id }
           : { scheduleId: event.id },
-      label: `${event.nome} em ${formatDateTimeBr(event.data)}`,
     });
     setActiveView("sessoes");
   }
@@ -414,12 +964,20 @@ export function PsicoApp() {
       <main className="login-shell">
         <div className="login-card shell-card">
           <section className="login-copy">
-            <div className="eyebrow">Configuracao pendente</div>
-            <h1>Configure o Supabase antes de publicar o app.</h1>
-            <p>
-              Defina `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-              no ambiente local e no provedor onde o site sera publicado.
-            </p>
+            <div className="brand-lockup brand-lockup-login">
+              <div className="brand-mark-shell">
+                <AppLogo className="brand-mark-image" priority />
+              </div>
+
+              <div className="brand-copy">
+                <div className="eyebrow">Configuracao pendente</div>
+                <h1>Configure o acesso do app antes de abrir o painel.</h1>
+                <p>
+                  Defina `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+                  no ambiente local e no deploy usado pelo site.
+                </p>
+              </div>
+            </div>
           </section>
 
           <section className="login-form-wrap">
@@ -447,18 +1005,33 @@ export function PsicoApp() {
     <main className="page-shell">
       <div className="shell-card app-frame">
         <header className="topbar">
-          <div className="headline">
-            <div className="eyebrow">PsicoApp | Static Deploy Ready</div>
-            <h1>Gestao clinica com interface web e deploy direto.</h1>
-            <p>
-              O backend fica no Supabase. A interface em Next.js concentra login,
-              cadastro, sessoes e calendario em uma unica app.
-            </p>
+          <div className="brand-lockup brand-lockup-hero">
+            <div className="brand-mark-shell">
+              <AppLogo className="brand-mark-image" priority />
+            </div>
+
+            <div className="headline">
+              <div className="eyebrow">PsicoApp | Painel clinico</div>
+              <h1 className="headline-compact">
+                <span>Pacientes, sessoes e agenda</span>
+                <span>em um fluxo unico.</span>
+              </h1>
+              <p>
+                Consulte cadastros, registre atendimentos e acompanhe a agenda sem
+                telas paralelas nem etapas herdadas da migracao.
+              </p>
+            </div>
           </div>
 
           <div className="session-badge">
             <strong>{session.user.email}</strong>
-            <span>{dataLoading ? "Sincronizando dados..." : "Sessao autenticada no Supabase"}</span>
+            <span>
+              {dataLoading
+                ? "Atualizando painel..."
+                : syncIssue
+                  ? "Mostrando ultimo estado disponivel"
+                  : "Sessao ativa"}
+            </span>
             <div className="actions-row">
               <button className="btn btn-danger" type="button" onClick={() => void handleSignOut()}>
                 Sair
@@ -470,6 +1043,56 @@ export function PsicoApp() {
         {flash && <div className={`flash ${flash.type}`}>{flash.text}</div>}
 
         <div className="content-shell">
+          {initialLoadState === "pending" && !currentViewHasVisibleData && (
+            <section className="panel reveal">
+              <div className="panel-title">
+                <div>
+                  <h2 className="panel-heading">Carregando</h2>
+                  <p className="panel-subcopy">{currentViewLoadingCopy(activeView)}</p>
+                </div>
+              </div>
+              <div className="notice-card">
+                <strong>Primeira carga em andamento</strong>
+                <p>
+                  O app está buscando os dados no Supabase. Se houver muito histórico,
+                  esse passo pode levar alguns segundos.
+                </p>
+              </div>
+            </section>
+          )}
+
+          {initialLoadState === "error" && !currentViewHasVisibleData && (
+            <section className="panel reveal">
+              <div className="panel-title">
+                <div>
+                  <h2 className="panel-heading">Falha temporaria</h2>
+                  <p className="panel-subcopy">{currentViewFailureCopy(activeView)}</p>
+                </div>
+              </div>
+              <div className="notice-card">
+                <strong>O painel ainda nao recebeu dados</strong>
+                <p>{syncIssue || "Verifique a conexao com o Supabase e tente novamente."}</p>
+              </div>
+              <div className="actions-row section-top-space">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => void retryCurrentView()}
+                >
+                  Tentar novamente
+                </button>
+              </div>
+            </section>
+          )}
+
+          {syncIssue && initialLoadState === "ready" && currentViewHasVisibleData && !dataLoading && (
+            <div className="flash info">
+              Atualizacao incompleta no momento. O app manteve os ultimos dados disponiveis.
+            </div>
+          )}
+
+          {initialLoadState === "ready" && (
+            <>
           <nav className="nav-row">
             {[
               ["painel", "Painel"],
@@ -489,18 +1112,44 @@ export function PsicoApp() {
           </nav>
 
           <div className="status-row">
-            <span className="pill">{patients.length} pacientes carregados</span>
-            <span className="pill">{entries.length} sessoes carregadas</span>
-            <span className="pill">{schedules.length} agendamentos carregados</span>
+            <span className="pill">
+              {datasetPillText(
+                patients.length,
+                patientsStatus,
+                "{count} pacientes carregados",
+                "Carregando pacientes...",
+                "Pacientes sob demanda",
+              )}
+            </span>
+            <span className="pill">
+              {datasetPillText(
+                entries.length,
+                entriesStatus,
+                "{count} sessoes carregadas",
+                "Carregando sessoes...",
+                "Sessoes sob demanda",
+              )}
+            </span>
+            <span className="pill">
+              {datasetPillText(
+                schedules.length,
+                schedulesStatus,
+                "{count} agendamentos carregados",
+                "Carregando agenda...",
+                "Agenda sob demanda",
+              )}
+            </span>
           </div>
 
           {activeView === "painel" && (
             <DashboardView
-              entries={entries}
+              initialSnapshot={dashboardSnapshot}
+              onLoadSnapshot={loadDashboardSnapshot}
+              onCreatePatient={requestNewPatient}
+              onCreateSession={requestNewSession}
               onCreateSessionForPatient={requestNewSessionForPatient}
-              onNavigate={setActiveView}
+              onOpenCalendar={() => setActiveView("calendario")}
               onOpenPatient={requestPatientEditor}
-              patients={patients}
             />
           )}
 
@@ -531,6 +1180,8 @@ export function PsicoApp() {
               onCreateAt={requestSessionAt}
               onOpenEvent={requestEventEdition}
             />
+          )}
+            </>
           )}
         </div>
       </div>

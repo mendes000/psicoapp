@@ -2,6 +2,7 @@
 
 import { getSupabaseBrowserClient } from "./supabase";
 import type {
+  DashboardSnapshot,
   Entry,
   IdValue,
   Patient,
@@ -12,6 +13,7 @@ import type {
   SessionFormValues,
 } from "./types";
 import {
+  buildDashboardSnapshot,
   combineLocalDateTime,
   parseFlexibleDate,
   stripDigits,
@@ -21,9 +23,64 @@ import {
 type TableName = "pacientes" | "entradas" | "agendamentos";
 
 const PAGE_SIZE = 1000;
+const PATIENT_COLUMNS = [
+  "id",
+  "nome",
+  "nascimento",
+  "cpf",
+  "tratamento",
+  "profissao",
+  "origem",
+  "quem_indicou",
+  "telefone",
+  "email",
+  "nome_do_contato",
+  "nome_contato",
+  "contato_emergencia",
+  "contato_de_emergencia",
+  "endereco",
+  "bairro",
+  "cidade",
+  "cep",
+  "nome_do_pai",
+  "nome_pai",
+  "nome_da_mae",
+  "nome_mae",
+  "observacoees",
+  "observacoes",
+].join(",");
+const ENTRY_COLUMNS = [
+  "id",
+  "data",
+  "nome",
+  "tipo",
+  "valor_sessao",
+  "valor_pago",
+  "obs",
+  "anotacoes_clinicas",
+].join(",");
+const SCHEDULE_COLUMNS = [
+  "id",
+  "data",
+  "nome",
+  "tipo",
+  "valor_sessao",
+  "valor_pago",
+  "obs",
+].join(",");
 
 async function fetchAllRows<T>(
   table: TableName,
+  columns: string,
+  orderBy: string,
+  ascending = true,
+) {
+  return fetchAllRowsWithColumns<T>(table, columns, orderBy, ascending);
+}
+
+async function fetchAllRowsWithColumns<T>(
+  table: TableName,
+  columns: string,
   orderBy: string,
   ascending = true,
 ) {
@@ -34,7 +91,7 @@ async function fetchAllRows<T>(
   while (true) {
     const { data, error } = await supabase
       .from(table)
-      .select("*")
+      .select(columns)
       .order(orderBy, { ascending })
       .range(from, from + PAGE_SIZE - 1);
 
@@ -55,26 +112,100 @@ async function fetchAllRows<T>(
   return records;
 }
 
+async function fetchAllRowsWithFallback<T>(
+  table: TableName,
+  columns: string,
+  orderBy: string,
+  ascending = true,
+) {
+  try {
+    return await fetchAllRowsWithColumns<T>(table, columns, orderBy, ascending);
+  } catch (error) {
+    if (columns === "*") {
+      throw error;
+    }
+
+    return fetchAllRowsWithColumns<T>(table, "*", orderBy, ascending);
+  }
+}
+
 export async function loadPatients() {
-  return fetchAllRows<Patient>("pacientes", "nome", true);
+  return fetchAllRowsWithFallback<Patient>("pacientes", PATIENT_COLUMNS, "nome", true);
 }
 
 export async function loadEntries() {
-  return fetchAllRows<Entry>("entradas", "data", false);
+  return fetchAllRowsWithFallback<Entry>("entradas", ENTRY_COLUMNS, "data", false);
 }
 
 export async function loadSchedules() {
-  return fetchAllRows<Schedule>("agendamentos", "data", true);
+  return fetchAllRowsWithFallback<Schedule>("agendamentos", SCHEDULE_COLUMNS, "data", true);
 }
 
-export async function loadClinicData() {
-  const [patients, entries, schedules] = await Promise.all([
-    loadPatients(),
-    loadEntries(),
-    loadSchedules(),
-  ]);
+function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
 
-  return { patients, entries, schedules };
+  const snapshot = value as Partial<DashboardSnapshot>;
+  return (
+    !!snapshot.metrics &&
+    typeof snapshot.reviewCount === "number" &&
+    typeof snapshot.totalCount === "number" &&
+    typeof snapshot.limited === "boolean" &&
+    Array.isArray(snapshot.items)
+  );
+}
+
+export async function loadDashboardSnapshot(options?: {
+  search?: string;
+  reviewOnly?: boolean;
+  itemLimit?: number;
+}) {
+  const search = String(options?.search ?? "").trim();
+  const reviewOnly = options?.reviewOnly ?? false;
+  const itemLimit = options?.itemLimit ?? 20;
+  const supabase = getSupabaseBrowserClient();
+
+  try {
+    const { data, error } = await supabase.rpc("buscar_painel_clinico", {
+      search_text: search || null,
+      review_only: reviewOnly,
+      item_limit: itemLimit,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!isDashboardSnapshot(data)) {
+      throw new Error("Resposta invalida do resumo do painel.");
+    }
+
+    return data;
+  } catch {
+    try {
+      const [patients, entries] = await Promise.all([loadPatients(), loadEntries()]);
+      return buildDashboardSnapshot(patients, entries, {
+        search,
+        reviewOnly,
+        itemLimit,
+      });
+    } catch (fallbackError) {
+      if (fallbackError instanceof Error) {
+        throw fallbackError;
+      }
+
+      const message =
+        typeof fallbackError === "object" &&
+        fallbackError !== null &&
+        "message" in fallbackError &&
+        typeof fallbackError.message === "string"
+          ? fallbackError.message
+          : "Falha ao carregar o painel.";
+
+      throw new Error(message);
+    }
+  }
 }
 
 function insertPayload(values: Record<string, unknown>) {

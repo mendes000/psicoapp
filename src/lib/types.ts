@@ -60,7 +60,12 @@ export interface Schedule {
 }
 
 export interface ConsolidatedPatient {
-  nomeKey: string;
+  key: string;
+  patientKey: string;
+  hasPatientRecord: boolean;
+  reviewState: "ok" | "duplicate-name" | "entry-only";
+  duplicateNameCount: number;
+  reviewNote: string;
   nome: string;
   nascimento: string;
   cpf: string;
@@ -80,11 +85,25 @@ export interface ConsolidatedPatient {
   nomeMae: string;
   observacoes: string;
   totalSessoes: number;
-  totalCobrado: number;
   totalPago: number;
   saldo: number;
   ultimaSessaoData: string;
   ultimasSessoes: Entry[];
+}
+
+export interface DashboardMetrics {
+  totalCadastros: number;
+  totalSessoes: number;
+  totalPago: number;
+  saldo: number;
+}
+
+export interface DashboardSnapshot {
+  metrics: DashboardMetrics;
+  reviewCount: number;
+  totalCount: number;
+  limited: boolean;
+  items: ConsolidatedPatient[];
 }
 
 export interface PatientColumnMap {
@@ -137,13 +156,10 @@ export interface SessionEditorContext {
 export interface SessionSeed {
   form: Partial<SessionFormValues>;
   context?: SessionEditorContext;
-  requestedAt: number;
-  label?: string;
 }
 
 export interface PatientSelectionRequest {
   key: string;
-  requestedAt: number;
 }
 
 export interface CalendarEvent {

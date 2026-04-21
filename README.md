@@ -1,12 +1,13 @@
 # PsicoApp
 
-Aplicativo web de gestao clinica em `Next.js + Supabase`, preparado para deploy estatico.
+Aplicativo web de gestao clinica em `Next.js + Supabase`, com deploy estatico no Cloudflare Pages.
 
-## Estado atual
+## Arquitetura atual
 
-- A raiz do repositorio agora e `Cloudflare-ready`
-- O frontend ativo fica em `app/` e `src/`
-- O legado em Streamlit foi arquivado em `legacy/streamlit/`
+- Frontend ativo em `app/` e `src/`
+- Autenticacao e dados servidos pelo Supabase
+- Build estatico gerado em `out/`
+- Deploy automatico por GitHub Actions para Cloudflare Pages
 
 ## Requisitos
 
@@ -35,7 +36,15 @@ npm run typecheck
 npm run build
 ```
 
-## Deploy no Cloudflare Pages
+## Fluxos web ativos
+
+- Login com email e senha
+- Painel consolidado de pacientes
+- Cadastro e edicao de pacientes
+- Lancamento e agendamento de sessoes
+- Calendario semanal e mensal
+
+## Deploy
 
 1. Importe este repositorio no Cloudflare Pages.
 2. Use o preset `Next.js (Static HTML Export)`.
@@ -51,26 +60,8 @@ npm run build
    - sessoes
    - calendario
 
-## Guia do Cloudflare
+## Documentacao de apoio
 
 - Passo a passo: `docs/cloudflare-pages.md`
-
-## Checklist de corte final do Streamlit
-
-- Desligar qualquer processo local de `streamlit run`
-- Parar de usar `legacy/streamlit` como runtime
-- Garantir RLS e policies no Supabase para as tabelas consumidas pelo frontend
-- Rotacionar credenciais antigas se algum segredo do Streamlit ja tiver sido versionado no passado
-
-## Go-live do Supabase
-
 - Checklist: `docs/supabase-go-live.md`
 - SQL de operador unico: `supabase/templates/rls-single-operator.sql`
-
-## Fluxos web ativos
-
-- Login com email e senha via Supabase Auth
-- Painel consolidado de pacientes
-- Cadastro e edicao de pacientes
-- Lancamento e agendamento de sessoes
-- Calendario semanal e mensal

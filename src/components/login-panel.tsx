@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { AppLogo } from "./app-logo";
+
 interface LoginPanelProps {
   onSubmit: (email: string, password: string) => Promise<void>;
   isBusy: boolean;
@@ -29,12 +31,21 @@ export function LoginPanel({ onSubmit, isBusy, error }: LoginPanelProps) {
     <div className="login-shell">
       <div className="login-card shell-card reveal">
         <section className="login-copy">
-          <div className="eyebrow">PsicoApp</div>
-          <h1>Painel clinico para atendimento, cadastro e agenda.</h1>
-          <p>
-            Centralize pacientes, sessoes e agendamentos em uma interface unica,
-            com acesso seguro e operacao direta no Supabase.
-          </p>
+          <div className="brand-lockup brand-lockup-login">
+            <div className="brand-mark-shell">
+              <AppLogo className="brand-mark-image" priority />
+            </div>
+
+            <div className="brand-copy">
+              <div className="eyebrow">PsicoApp</div>
+              <h1>Painel clinico para atendimento, cadastro e agenda.</h1>
+              <p>
+                Centralize pacientes, sessoes e agendamentos em uma interface unica,
+                com acesso seguro e operacao direta no Supabase.
+              </p>
+            </div>
+          </div>
+
           <ul>
             <li>Painel consolidado com busca por paciente, CPF e email.</li>
             <li>Cadastro e edicao de pacientes em um fluxo simples.</li>
@@ -45,7 +56,7 @@ export function LoginPanel({ onSubmit, isBusy, error }: LoginPanelProps) {
         <section className="login-form-wrap">
           <div className="panel-title">
             <div>
-              <h2>Entrar</h2>
+              <h2 className="panel-heading">Entrar</h2>
               <p className="panel-subcopy">
                 Use seu email e senha para acessar o sistema.
               </p>

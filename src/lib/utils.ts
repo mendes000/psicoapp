@@ -1,6 +1,7 @@
 import type {
   CalendarEvent,
   ConsolidatedPatient,
+  DashboardSnapshot,
   Entry,
   Patient,
   PatientColumnMap,
@@ -284,6 +285,29 @@ export function similarity(a: string, b: string) {
   return (2 * matches) / (Math.max(left.length - 1, 0) + Math.max(right.length - 1, 0));
 }
 
+export function patientRecordKey(patient: Patient) {
+  if (patient.id != null && patient.id !== "") {
+    return `id:${patient.id}`;
+  }
+
+  const cpf = stripDigits(patient.cpf);
+  if (cpf) {
+    return `cpf:${cpf}`;
+  }
+
+  const email = String(patient.email ?? "").trim().toLowerCase();
+  if (email) {
+    return `email:${email}`;
+  }
+
+  const phone = stripDigits(patient.telefone);
+  if (phone) {
+    return `tel:${phone}`;
+  }
+
+  return `nome:${normalizeText(patient.nome)}`;
+}
+
 function firstFilled(record: Patient | Entry, ...fields: string[]) {
   for (const field of fields) {
     const value = record[field];
@@ -316,7 +340,6 @@ export function consolidatePatients(patients: Patient[], entries: Entry[]) {
     string,
     {
       totalSessoes: number;
-      totalCobrado: number;
       totalPago: number;
       saldo: number;
       ultimaSessaoData: string;
@@ -356,7 +379,6 @@ export function consolidatePatients(patients: Patient[], entries: Entry[]) {
 
     entryMap.set(key, {
       totalSessoes: grouped.length,
-      totalCobrado,
       totalPago,
       saldo: totalPago - totalCobrado,
       ultimaSessaoData: String(grouped[0]?.data ?? ""),
@@ -380,41 +402,100 @@ export function consolidatePatients(patients: Patient[], entries: Entry[]) {
   const lines: ConsolidatedPatient[] = [];
 
   for (const [key, grouped] of groupedPatients.entries()) {
-    const sessionData = entryMap.get(key) ?? {
-      totalSessoes: 0,
-      totalCobrado: 0,
-      totalPago: 0,
-      saldo: 0,
-      ultimaSessaoData: "",
-      ultimasSessoes: [],
-    };
+    const uniquePatient = grouped.length === 1 ? grouped[0] : null;
+    const sessionData = uniquePatient
+      ? (entryMap.get(key) ?? {
+          totalSessoes: 0,
+          totalPago: 0,
+          saldo: 0,
+          ultimaSessaoData: "",
+          ultimasSessoes: [],
+        })
+      : {
+          totalSessoes: 0,
+          totalPago: 0,
+          saldo: 0,
+          ultimaSessaoData: "",
+          ultimasSessoes: [],
+        };
 
-    lines.push({
-      nomeKey: key,
-      nome: firstFilledAcross(grouped, "nome"),
-      nascimento: firstFilledAcross(grouped, "nascimento"),
-      cpf: firstFilledAcross(grouped, "cpf"),
-      tratamento: firstFilledAcross(grouped, "tratamento"),
-      profissao: firstFilledAcross(grouped, "profissao"),
-      origem: firstFilledAcross(grouped, "origem"),
-      quemIndicou: firstFilledAcross(grouped, "quem_indicou"),
-      telefone: firstFilledAcross(grouped, "telefone"),
-      email: firstFilledAcross(grouped, "email"),
-      nomeContato: firstFilledAcross(grouped, "nome_do_contato", "nome_contato"),
-      contatoEmergencia: firstFilledAcross(
-        grouped,
-        "contato_emergencia",
-        "contato_de_emergencia",
-      ),
-      endereco: firstFilledAcross(grouped, "endereco"),
-      bairro: firstFilledAcross(grouped, "bairro"),
-      cidade: firstFilledAcross(grouped, "cidade"),
-      cep: firstFilledAcross(grouped, "cep"),
-      nomePai: firstFilledAcross(grouped, "nome_do_pai", "nome_pai"),
-      nomeMae: firstFilledAcross(grouped, "nome_da_mae", "nome_mae"),
-      observacoes: firstFilledAcross(grouped, "observacoees", "observacoes"),
-      ...sessionData,
-    });
+    for (const patient of grouped) {
+      const duplicateNameCount = grouped.length;
+      const hasDuplicateName = duplicateNameCount > 1;
+
+      lines.push({
+        key: `patient:${patientRecordKey(patient)}`,
+        patientKey: patientRecordKey(patient),
+        hasPatientRecord: true,
+        reviewState: hasDuplicateName ? "duplicate-name" : "ok",
+        duplicateNameCount,
+        reviewNote: hasDuplicateName
+          ? "Existe mais de um cadastro com este nome. O painel nao vincula sessoes automaticamente nesses casos."
+          : "",
+        nome: firstFilled(patient, "nome"),
+        nascimento: firstFilled(patient, "nascimento"),
+        cpf: firstFilled(patient, "cpf"),
+        tratamento: firstFilled(patient, "tratamento"),
+        profissao: firstFilled(patient, "profissao"),
+        origem: firstFilled(patient, "origem"),
+        quemIndicou: firstFilled(patient, "quem_indicou"),
+        telefone: firstFilled(patient, "telefone"),
+        email: firstFilled(patient, "email"),
+        nomeContato: firstFilled(patient, "nome_do_contato", "nome_contato"),
+        contatoEmergencia: firstFilled(
+          patient,
+          "contato_emergencia",
+          "contato_de_emergencia",
+        ),
+        endereco: firstFilled(patient, "endereco"),
+        bairro: firstFilled(patient, "bairro"),
+        cidade: firstFilled(patient, "cidade"),
+        cep: firstFilled(patient, "cep"),
+        nomePai: firstFilled(patient, "nome_do_pai", "nome_pai"),
+        nomeMae: firstFilled(patient, "nome_da_mae", "nome_mae"),
+        observacoes: firstFilled(patient, "observacoees", "observacoes"),
+        ...sessionData,
+      });
+    }
+
+    if (grouped.length > 1 && entryMap.has(key)) {
+      const ambiguousSessions = entryMap.get(key) ?? {
+        totalSessoes: 0,
+        totalPago: 0,
+        saldo: 0,
+        ultimaSessaoData: "",
+        ultimasSessoes: [],
+      };
+
+      lines.push({
+        key: `entries:${key}`,
+        patientKey: "",
+        hasPatientRecord: false,
+        reviewState: "entry-only",
+        duplicateNameCount: grouped.length,
+        reviewNote:
+          "Ha sessoes com este nome, mas existem multiplos cadastros homonimos. Revise manualmente antes de assumir o vinculo.",
+        nome: `${firstFilledAcross(grouped, "nome") || key} | sessoes sem vinculo seguro`,
+        nascimento: "",
+        cpf: "",
+        tratamento: "",
+        profissao: "",
+        origem: "",
+        quemIndicou: "",
+        telefone: "",
+        email: "",
+        nomeContato: "",
+        contatoEmergencia: "",
+        endereco: "",
+        bairro: "",
+        cidade: "",
+        cep: "",
+        nomePai: "",
+        nomeMae: "",
+        observacoes: "",
+        ...ambiguousSessions,
+      });
+    }
   }
 
   for (const [key, sessionData] of entryMap.entries()) {
@@ -425,7 +506,13 @@ export function consolidatePatients(patients: Patient[], entries: Entry[]) {
     const baseName = String(sessionData.ultimasSessoes[0]?.nome ?? "").trim();
 
     lines.push({
-      nomeKey: key,
+      key: `entries:${key}`,
+      patientKey: "",
+      hasPatientRecord: false,
+      reviewState: "entry-only",
+      duplicateNameCount: 0,
+      reviewNote:
+        "Existem sessoes registradas com este nome, mas nenhum cadastro correspondente foi encontrado.",
       nome: baseName || key,
       nascimento: "",
       cpf: "",
@@ -468,13 +555,53 @@ export function matchesConsolidatedSearch(patient: ConsolidatedPatient, rawSearc
 
   const searchRaw = String(rawSearch ?? "").trim().toLowerCase();
   const nameKey = normalizeText(patient.nome);
+  const phone = stripDigits(patient.telefone);
 
   return (
     nameKey.includes(search) ||
     similarity(nameKey, search) >= 0.72 ||
     patient.cpf.toLowerCase().includes(searchRaw) ||
-    patient.email.toLowerCase().includes(searchRaw)
+    patient.email.toLowerCase().includes(searchRaw) ||
+    phone.includes(stripDigits(searchRaw))
   );
+}
+
+export function buildDashboardSnapshot(
+  patients: Patient[],
+  entries: Entry[],
+  options?: {
+    search?: string;
+    reviewOnly?: boolean;
+    itemLimit?: number;
+  },
+): DashboardSnapshot {
+  const search = String(options?.search ?? "").trim();
+  const reviewOnly = options?.reviewOnly ?? false;
+  const itemLimit = options?.itemLimit ?? 20;
+  const consolidated = consolidatePatients(patients, entries);
+  const patientCards = consolidated.filter((patient) => patient.hasPatientRecord);
+  const reviewCards = consolidated.filter((patient) => patient.reviewState !== "ok");
+  const source = reviewOnly ? reviewCards : consolidated;
+  const filtered = search
+    ? source.filter((patient) => matchesConsolidatedSearch(patient, search))
+    : source;
+  const items = search || reviewOnly ? filtered : filtered.slice(0, itemLimit);
+
+  return {
+    metrics: {
+      totalCadastros: patientCards.length,
+      totalSessoes: entries.length,
+      totalPago: entries.reduce((sum, entry) => sum + toNumber(entry.valor_pago), 0),
+      saldo: entries.reduce(
+        (sum, entry) => sum + toNumber(entry.valor_pago) - toNumber(entry.valor_sessao),
+        0,
+      ),
+    },
+    reviewCount: reviewCards.length,
+    totalCount: filtered.length,
+    limited: !search && !reviewOnly && filtered.length > items.length,
+    items,
+  };
 }
 
 export function collectPatientColumns(patients: Patient[]): PatientColumnMap {

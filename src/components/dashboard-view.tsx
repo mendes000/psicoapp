@@ -1,86 +1,153 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 
-import type {
-  ConsolidatedPatient,
-  Entry,
-  Patient,
-} from "../lib/types";
+import type { DashboardSnapshot } from "../lib/types";
 import {
   calculateAge,
-  consolidatePatients,
   formatCurrency,
   formatDateBr,
   formatDateTimeBr,
-  matchesConsolidatedSearch,
-  toNumber,
 } from "../lib/utils";
 
 interface DashboardViewProps {
-  patients: Patient[];
-  entries: Entry[];
+  initialSnapshot: DashboardSnapshot | null;
+  onLoadSnapshot: (options?: {
+    search?: string;
+    reviewOnly?: boolean;
+    itemLimit?: number;
+  }) => Promise<DashboardSnapshot>;
   onOpenPatient: (patientKey: string) => void;
   onCreateSessionForPatient: (name: string) => void;
-  onNavigate: (view: "pacientes" | "sessoes" | "calendario") => void;
+  onCreatePatient: () => void;
+  onCreateSession: () => void;
+  onOpenCalendar: () => void;
 }
 
-function metricValue(list: ConsolidatedPatient[], key: "totalSessoes" | "totalPago" | "saldo") {
-  return list.reduce((sum, patient) => sum + toNumber(patient[key]), 0);
-}
+const EMPTY_SNAPSHOT: DashboardSnapshot = {
+  metrics: {
+    totalCadastros: 0,
+    totalSessoes: 0,
+    totalPago: 0,
+    saldo: 0,
+  },
+  reviewCount: 0,
+  totalCount: 0,
+  limited: false,
+  items: [],
+};
 
 export function DashboardView({
-  patients,
-  entries,
+  initialSnapshot,
+  onLoadSnapshot,
   onOpenPatient,
   onCreateSessionForPatient,
-  onNavigate,
+  onCreatePatient,
+  onCreateSession,
+  onOpenCalendar,
 }: DashboardViewProps) {
   const [search, setSearch] = useState("");
+  const [reviewOnly, setReviewOnly] = useState(false);
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(initialSnapshot);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const deferredSearch = useDeferredValue(search);
-  const consolidated = useMemo(
-    () => consolidatePatients(patients, entries),
-    [patients, entries],
-  );
-  const metrics = useMemo(
-    () => ({
-      totalSessoes: metricValue(consolidated, "totalSessoes"),
-      totalPago: metricValue(consolidated, "totalPago"),
-      saldo: metricValue(consolidated, "saldo"),
-    }),
-    [consolidated],
-  );
-  const visible = useMemo(() => {
-    const search = deferredSearch.trim();
-    if (!search) {
-      return consolidated.slice(0, 20);
+  const searchLabel = deferredSearch.trim();
+  const activeSnapshot = snapshot ?? initialSnapshot ?? EMPTY_SNAPSHOT;
+
+  useEffect(() => {
+    if (!searchLabel && !reviewOnly && initialSnapshot) {
+      setSnapshot(initialSnapshot);
+      setLoadError("");
+    }
+  }, [initialSnapshot, reviewOnly, searchLabel]);
+
+  useEffect(() => {
+    if (!searchLabel && !reviewOnly) {
+      return;
     }
 
-    return consolidated.filter((patient) =>
-      matchesConsolidatedSearch(patient, search),
-    );
-  }, [consolidated, deferredSearch]);
+    let cancelled = false;
+
+    setLoading(true);
+    setLoadError("");
+
+    void onLoadSnapshot({
+      search: searchLabel,
+      reviewOnly,
+      itemLimit: reviewOnly ? 200 : 100,
+    })
+      .then((nextSnapshot) => {
+        if (cancelled) {
+          return;
+        }
+
+        setSnapshot(nextSnapshot);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setLoadError(
+          error instanceof Error ? error.message : "Falha ao atualizar o painel.",
+        );
+      })
+      .finally(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadSnapshot, reviewOnly, searchLabel]);
+
+  const visible = activeSnapshot.items;
 
   return (
     <section className="layout-grid reveal">
       <div className="stats-grid">
         <article className="stat-card">
-          <span>Pacientes consolidados</span>
-          <strong>{consolidated.length}</strong>
+          <span>Cadastros ativos</span>
+          <strong>{activeSnapshot.metrics.totalCadastros}</strong>
         </article>
         <article className="stat-card">
           <span>Sessoes registradas</span>
-          <strong>{metrics.totalSessoes}</strong>
+          <strong>{activeSnapshot.metrics.totalSessoes}</strong>
         </article>
         <article className="stat-card">
           <span>Total pago</span>
-          <strong>{formatCurrency(metrics.totalPago)}</strong>
+          <strong>{formatCurrency(activeSnapshot.metrics.totalPago)}</strong>
         </article>
         <article className="stat-card">
           <span>Saldo consolidado</span>
-          <strong>{formatCurrency(metrics.saldo)}</strong>
+          <strong>{formatCurrency(activeSnapshot.metrics.saldo)}</strong>
         </article>
       </div>
+
+      {activeSnapshot.reviewCount > 0 && (
+        <div className="notice-card">
+          <strong>Revisao de vinculos recomendada</strong>
+          <p>
+            {activeSnapshot.reviewCount} item(ns) do painel ficaram fora do vinculo
+            automatico para evitar mistura de historicos entre homonimos ou nomes sem
+            cadastro.
+          </p>
+          <div className="actions-row">
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => setReviewOnly((current) => !current)}
+            >
+              {reviewOnly ? "Voltar ao painel completo" : "Ver apenas pendencias"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="toolbar">
         <div className="search-row">
@@ -100,21 +167,21 @@ export function DashboardView({
           <button
             className="btn btn-secondary"
             type="button"
-            onClick={() => onNavigate("pacientes")}
+            onClick={onCreatePatient}
           >
             Novo paciente
           </button>
           <button
             className="btn btn-secondary"
             type="button"
-            onClick={() => onNavigate("sessoes")}
+            onClick={onCreateSession}
           >
             Nova sessao
           </button>
           <button
             className="btn btn-secondary"
             type="button"
-            onClick={() => onNavigate("calendario")}
+            onClick={onOpenCalendar}
           >
             Abrir calendario
           </button>
@@ -124,25 +191,51 @@ export function DashboardView({
       <div className="panel">
         <div className="panel-title">
           <div>
-            <h2>Painel de pacientes</h2>
+            <h2 className="panel-heading">Painel</h2>
             <p className="panel-subcopy">
-              {deferredSearch.trim()
-                ? `Resultados para "${deferredSearch.trim()}".`
-                : "Mostrando os 20 pacientes mais recentes. Use a busca para localizar os demais."}
+              {reviewOnly
+                ? searchLabel
+                  ? `Pendencias para revisar com filtro "${searchLabel}".`
+                  : `Mostrando ${activeSnapshot.totalCount} item(ns) pendentes de revisao.`
+                : searchLabel
+                  ? `Resultados para "${searchLabel}".`
+                  : activeSnapshot.limited
+                    ? "Mostrando os 20 pacientes mais recentes. Use a busca para localizar os demais."
+                    : "Mostrando o panorama consolidado do atendimento."}
             </p>
+          </div>
+          <div className="panel-meta">
+            <span className="pill">{activeSnapshot.reviewCount} para revisar</span>
+            {reviewOnly && <span className="pill">Filtro de revisao ativo</span>}
+            {loading && <span className="pill">Atualizando busca...</span>}
+            <span className="pill">
+              {searchLabel
+                ? `${activeSnapshot.totalCount} encontrados`
+                : activeSnapshot.limited
+                  ? `${visible.length} visiveis`
+                  : `${activeSnapshot.totalCount} visiveis`}
+            </span>
           </div>
         </div>
 
+        {loadError && (
+          <div className="flash info">
+            Atualizacao parcial no painel. {loadError}
+          </div>
+        )}
+
         {visible.length === 0 ? (
           <div className="empty-state">
-            Nenhum paciente encontrado para o filtro informado.
+            {reviewOnly
+              ? "Nenhuma pendencia encontrada para o filtro informado."
+              : "Nenhum paciente encontrado para o filtro informado."}
           </div>
         ) : (
           <div className="stack-list">
             {visible.map((patient, index) => (
               <details
                 className="stack-card reveal"
-                key={patient.nomeKey}
+                key={patient.key}
                 style={{ animationDelay: `${Math.min(index * 40, 240)}ms` }}
               >
                 <summary>
@@ -150,6 +243,12 @@ export function DashboardView({
                     <div>
                       <strong>{patient.nome || "(Sem nome)"}</strong>
                       <div className="session-meta">
+                        {patient.reviewState === "duplicate-name" && (
+                          <span>Homonimo em {patient.duplicateNameCount} cadastros</span>
+                        )}
+                        {patient.reviewState === "entry-only" && (
+                          <span>Historico sem vinculo automatico</span>
+                        )}
                         {patient.tratamento && <span>{patient.tratamento}</span>}
                         {patient.cpf && <span>CPF {patient.cpf}</span>}
                         {patient.ultimaSessaoData && (
@@ -166,20 +265,29 @@ export function DashboardView({
                 </summary>
 
                 <div className="stack-body">
+                  {patient.reviewState !== "ok" && (
+                    <div className="notice-card inline-notice">
+                      <strong>Revisao manual necessaria</strong>
+                      <p>{patient.reviewNote}</p>
+                    </div>
+                  )}
+
                   <div className="actions-row">
-                    <button
-                      className="btn btn-secondary"
-                      type="button"
-                      onClick={() => onOpenPatient(patient.nomeKey)}
-                    >
-                      Editar cadastro
-                    </button>
+                    {patient.hasPatientRecord && (
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        onClick={() => onOpenPatient(patient.patientKey)}
+                      >
+                        Editar cadastro
+                      </button>
+                    )}
                     <button
                       className="btn btn-secondary"
                       type="button"
                       onClick={() => onCreateSessionForPatient(patient.nome)}
                     >
-                      Registrar sessao
+                      {patient.hasPatientRecord ? "Registrar sessao" : "Abrir sessao com este nome"}
                     </button>
                   </div>
 
@@ -198,50 +306,58 @@ export function DashboardView({
                     </div>
                   </div>
 
-                  <section className="layout-grid">
-                    <h3 className="section-heading">Dados pessoais</h3>
-                    <div className="detail-grid">
-                      <Detail label="Nascimento" value={formatDateBr(patient.nascimento)} />
-                      <Detail label="Idade" value={calculateAge(patient.nascimento)} />
-                      <Detail label="CPF" value={patient.cpf} />
-                      <Detail label="Profissao" value={patient.profissao} />
-                      <Detail label="Origem" value={patient.origem} />
-                      <Detail label="Quem indicou" value={patient.quemIndicou} />
-                    </div>
-                  </section>
+                  {patient.hasPatientRecord && (
+                    <>
+                      <section className="layout-grid">
+                        <h3 className="section-heading">Dados pessoais</h3>
+                        <div className="detail-grid">
+                          <Detail label="Nascimento" value={formatDateBr(patient.nascimento)} />
+                          <Detail label="Idade" value={calculateAge(patient.nascimento)} />
+                          <Detail label="CPF" value={patient.cpf} />
+                          <Detail label="Profissao" value={patient.profissao} />
+                          <Detail label="Origem" value={patient.origem} />
+                          <Detail label="Quem indicou" value={patient.quemIndicou} />
+                        </div>
+                      </section>
+
+                      <section className="layout-grid">
+                        <h3 className="section-heading">Contato e endereco</h3>
+                        <div className="detail-grid">
+                          <Detail label="Telefone" value={patient.telefone} />
+                          <Detail label="Email" value={patient.email} />
+                          <Detail label="Contato emergencia" value={patient.contatoEmergencia} />
+                          <Detail label="Nome contato" value={patient.nomeContato} />
+                          <Detail label="Endereco" value={patient.endereco} />
+                          <Detail label="Bairro" value={patient.bairro} />
+                          <Detail label="Cidade" value={patient.cidade} />
+                          <Detail label="CEP" value={patient.cep} />
+                        </div>
+                      </section>
+
+                      <section className="layout-grid">
+                        <h3 className="section-heading">Familia e observacoes</h3>
+                        <div className="detail-grid">
+                          <Detail label="Nome do pai" value={patient.nomePai} />
+                          <Detail label="Nome da mae" value={patient.nomeMae} />
+                          <Detail
+                            label="Observacoes"
+                            value={patient.observacoes}
+                            className="detail-item"
+                          />
+                        </div>
+                      </section>
+                    </>
+                  )}
 
                   <section className="layout-grid">
-                    <h3 className="section-heading">Contato e endereco</h3>
-                    <div className="detail-grid">
-                      <Detail label="Telefone" value={patient.telefone} />
-                      <Detail label="Email" value={patient.email} />
-                      <Detail label="Contato emergencia" value={patient.contatoEmergencia} />
-                      <Detail label="Nome contato" value={patient.nomeContato} />
-                      <Detail label="Endereco" value={patient.endereco} />
-                      <Detail label="Bairro" value={patient.bairro} />
-                      <Detail label="Cidade" value={patient.cidade} />
-                      <Detail label="CEP" value={patient.cep} />
-                    </div>
-                  </section>
-
-                  <section className="layout-grid">
-                    <h3 className="section-heading">Familia e observacoes</h3>
-                    <div className="detail-grid">
-                      <Detail label="Nome do pai" value={patient.nomePai} />
-                      <Detail label="Nome da mae" value={patient.nomeMae} />
-                      <Detail
-                        label="Observacoes"
-                        value={patient.observacoes}
-                        className="detail-item"
-                      />
-                    </div>
-                  </section>
-
-                  <section className="layout-grid">
-                    <h3 className="section-heading">Ultimas sessoes</h3>
+                    <h3 className="section-heading">
+                      {patient.hasPatientRecord ? "Ultimas sessoes" : "Historico encontrado"}
+                    </h3>
                     {patient.ultimasSessoes.length === 0 ? (
                       <div className="empty-state">
-                        Nenhuma sessao encontrada para este paciente.
+                        {patient.hasPatientRecord
+                          ? "Nenhuma sessao encontrada para este paciente."
+                          : "Nenhuma sessao encontrada para este historico."}
                       </div>
                     ) : (
                       <div className="session-list">
@@ -249,7 +365,7 @@ export function DashboardView({
                           <article
                             className="session-row"
                             key={[
-                              patient.nomeKey,
+                              patient.key,
                               entry.id ?? "sem-id",
                               entry.data ?? "sem-data",
                               index,

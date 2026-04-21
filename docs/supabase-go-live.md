@@ -6,7 +6,8 @@ Checklist objetivo para publicar o `psicoapp` com o banco protegido.
 
 - O frontend usa o cliente browser do Supabase em `src/lib/supabase.ts`.
 - As leituras e escritas acontecem direto do navegador nas tabelas `public.pacientes`, `public.entradas` e `public.agendamentos`.
-- O frontend atual nao usa `public.pacientes_consolidados`.
+- O painel inicial tenta usar a funcao `public.buscar_painel_clinico(...)` para abrir mais leve.
+- Se a funcao ainda nao existir no banco, o frontend cai automaticamente no modo de compatibilidade e monta o painel no navegador.
 
 Isso significa que a seguranca do app publicado depende diretamente de:
 
@@ -63,7 +64,7 @@ Passos recomendados:
   - `public.pacientes`
   - `public.entradas`
   - `public.agendamentos`
-- Se `public.pacientes_consolidados` continuar sem uso no app, nao criar policy permissiva para ela
+- Se for usar o painel otimizado, revisar tambem o acesso da funcao `public.buscar_painel_clinico(...)`
 - Rodar o Security Advisor do Supabase e zerar alertas relevantes antes do go-live
 
 ### API

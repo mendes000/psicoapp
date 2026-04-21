@@ -85,7 +85,7 @@ export function CalendarView({
     <section className="panel reveal">
       <div className="panel-title">
         <div>
-          <h2>Calendario de sessoes</h2>
+          <h2 className="panel-heading">Agenda</h2>
           <p className="panel-subcopy">
             Clique em um dia para abrir o formulario de sessoes com data e horario preenchidos.
           </p>

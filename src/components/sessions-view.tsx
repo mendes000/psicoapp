@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   Entry,
@@ -48,6 +48,7 @@ export function SessionsView({
   const [context, setContext] = useState<SessionEditorContext>({});
   const [busyAction, setBusyAction] = useState<"schedule" | "save" | null>(null);
   const [search, setSearch] = useState("");
+  const formPanelRef = useRef<HTMLDivElement | null>(null);
   const deferredSearch = useDeferredValue(search);
 
   const patientNames = useMemo(
@@ -106,18 +107,25 @@ export function SessionsView({
       entries.length
     );
   }, [entries]);
-
-  function prefillFromEntry(entry: Entry) {
-    setForm(entryToSessionForm(entry));
-    setContext({ entryId: entry.id });
-  }
-
-  function canSelectStatus() {
+  const canSaveSession = useMemo(() => {
     const date = parseFlexibleDate(`${form.data}T${form.hora}`);
     if (!date) {
       return false;
     }
+
     return Date.now() > date.getTime();
+  }, [form.data, form.hora]);
+
+  function prefillFromEntry(entry: Entry) {
+    setForm(entryToSessionForm(entry));
+    setContext({ entryId: entry.id });
+
+    window.requestAnimationFrame(() => {
+      formPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   }
 
   async function handleSchedule(event: React.FormEvent<HTMLFormElement>) {
@@ -177,21 +185,105 @@ export function SessionsView({
   }
 
   return (
-    <section className="layout-grid reveal">
-      <div className="panel">
+    <section className="two-col reveal">
+      <aside className="panel">
         <div className="panel-title">
           <div>
-            <h2>Lancamento de sessoes</h2>
+            <h2 className="panel-heading">Historico</h2>
+            <p className="panel-subcopy">
+              Selecione uma sessao existente para editar ou abra um formulario em branco.
+            </p>
+          </div>
+          <div className="panel-meta">
+            <span className="pill">{entries.length} sessoes registradas</span>
+            <span className="pill">{filteredEntries.length} visiveis</span>
+            <span className="pill">Ticket medio {formatCurrency(ticketMedio)}</span>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Filtrar sessoes</span>
+          <div className="input-shell">
+            <input
+              placeholder="Buscar por paciente ou observacao"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+        </label>
+
+        <div className="subtle-divider" />
+
+        <div className="patient-list">
+          <button
+            className={`patient-list-item ${context.entryId == null ? "active" : ""}`}
+            type="button"
+            onClick={() => {
+              setContext({});
+              setForm(emptySessionForm());
+              window.requestAnimationFrame(() => {
+                formPanelRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                });
+              });
+            }}
+          >
+            <strong>+ Nova sessao</strong>
+            <span>Abre o formulario em branco para um novo atendimento.</span>
+          </button>
+
+          {filteredEntries.map((entry, index) => (
+            <button
+              className={`patient-list-item ${context.entryId === entry.id ? "active" : ""}`}
+              key={[
+                entry.id ?? "sem-id",
+                entry.data ?? "sem-data",
+                entry.nome ?? "sem-nome",
+                index,
+              ].join("-")}
+              type="button"
+              onClick={() => prefillFromEntry(entry)}
+            >
+              <strong>{entry.nome || "Sem nome"}</strong>
+              <span>{formatDateTimeBr(entry.data)}</span>
+              <span>
+                {entry.tipo || "Sem tipo"} | Pago {formatCurrency(entry.valor_pago)}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {entries.length > 0 && (
+          <div className="status-row section-top-space">
+            <span className="pill">
+              Ultima sessao: {formatDateTimeBr(entries[0]?.data)}
+            </span>
+          </div>
+        )}
+      </aside>
+
+      <div className="panel" ref={formPanelRef}>
+        <div className="panel-title">
+          <div>
+            <h2 className="panel-heading">
+              {context.entryId != null ? "Editar sessao" : "Nova sessao"}
+            </h2>
             <p className="panel-subcopy">
               Agende atendimentos futuros ou registre sessoes realizadas, faltas e edicoes.
             </p>
           </div>
-          {context.entryId != null && (
-            <span className="pill">Editando sessao existente</span>
-          )}
-          {context.scheduleId != null && (
-            <span className="pill">Editando agendamento existente</span>
-          )}
+          <div className="panel-meta">
+            {context.entryId != null && (
+              <span className="pill">Editando sessao existente</span>
+            )}
+            {context.scheduleId != null && (
+              <span className="pill">Editando agendamento existente</span>
+            )}
+            {!canSaveSession && (
+              <span className="pill">Salvar atendimento libera apos o horario</span>
+            )}
+          </div>
         </div>
 
         <form className="layout-grid" onSubmit={handleSchedule}>
@@ -321,7 +413,7 @@ export function SessionsView({
               <span>Situacao</span>
               <div className="select-shell">
                 <select
-                  disabled={!canSelectStatus()}
+                  disabled={!canSaveSession}
                   value={form.situacao}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -355,7 +447,7 @@ export function SessionsView({
             </button>
             <button
               className="btn btn-primary"
-              disabled={busyAction !== null || !canSelectStatus()}
+              disabled={busyAction !== null || !canSaveSession}
               type="button"
               onClick={() => void handleSave()}
             >
@@ -372,86 +464,13 @@ export function SessionsView({
               Limpar
             </button>
           </div>
-        </form>
-      </div>
 
-      <div className="panel">
-        <div className="panel-title">
-          <div>
-            <h2>Tabela de sessoes</h2>
-            <p className="panel-subcopy">
-              Clique em uma sessao para carregar no formulario e editar.
+          {!canSaveSession && (
+            <p className="helper-text">
+              Para registrar o atendimento, a data e o horario precisam estar no passado.
             </p>
-          </div>
-          <label className="field" style={{ minWidth: 280 }}>
-            <span>Filtrar sessoes</span>
-            <div className="input-shell">
-              <input
-                placeholder="Buscar por paciente ou observacao"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-          </label>
-        </div>
-
-        {filteredEntries.length === 0 ? (
-          <div className="empty-state">Nenhuma sessao encontrada.</div>
-        ) : (
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Paciente</th>
-                  <th>Tipo</th>
-                  <th>Valor sessao</th>
-                  <th>Valor pago</th>
-                  <th>Acao</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEntries.map((entry, index) => (
-                  <tr
-                    key={[
-                      entry.id ?? "sem-id",
-                      entry.data ?? "sem-data",
-                      entry.nome ?? "sem-nome",
-                      index,
-                    ].join("-")}
-                  >
-                    <td>{formatDateTimeBr(entry.data)}</td>
-                    <td>{entry.nome || "Sem nome"}</td>
-                    <td>{entry.tipo || "Sem tipo"}</td>
-                    <td>{formatCurrency(entry.valor_sessao)}</td>
-                    <td>{formatCurrency(entry.valor_pago)}</td>
-                    <td>
-                      <button
-                        className="btn btn-secondary"
-                        type="button"
-                        onClick={() => prefillFromEntry(entry)}
-                      >
-                        Editar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {entries.length > 0 && (
-          <div className="status-row" style={{ marginTop: 18 }}>
-            <span className="pill">
-              Ultima sessao: {formatDateTimeBr(entries[0]?.data)}
-            </span>
-            <span className="pill">
-              Ticket medio:{" "}
-              {formatCurrency(ticketMedio)}
-            </span>
-          </div>
-        )}
+          )}
+        </form>
       </div>
     </section>
   );

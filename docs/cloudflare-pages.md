@@ -26,7 +26,7 @@ Esse workflow:
 - executa `npm ci`
 - executa `npm run typecheck`
 - executa `npm run build`
-- publica `out/` no projeto Cloudflare Pages `psicoapp-6fq`
+- publica `out/` no projeto Cloudflare Pages `psicoapp`
 
 ### Secrets necessarios no GitHub
 
@@ -62,7 +62,7 @@ Se voce quiser manter o projeto atual de Direct Upload e mesmo assim automatizar
 
 - mantenha o projeto existente no Cloudflare Pages
 - use o workflow do GitHub Actions deste repositorio
-- publique com `wrangler pages deploy out --project-name=psicoapp-6fq`
+- publique com `wrangler pages deploy out --project-name=psicoapp`
 
 ### Variaveis de ambiente
 

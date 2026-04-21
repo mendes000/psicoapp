@@ -215,8 +215,8 @@ cloudflare-upload/
 cloudflare-upload.zip
 
 # Local run logs
-streamlit.stdout.log
-streamlit.stderr.log
+next.stdout.log
+next.stderr.log
 
 # Marimo
 marimo/_static/
@@ -229,4 +229,3 @@ supabase/.temp/
 # Legacy/obsolete files kept only locally
 antigos/
 supabase/migrations/20260221095500_create_pacientes_consolidados.sql
-legacy/streamlit/.streamlit/secrets.toml

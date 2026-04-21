@@ -18,6 +18,7 @@ import {
   normalizeText,
   parseFlexibleDate,
   parseTreatments,
+  patientRecordKey,
   patientToFormValues,
   serializeTreatments,
   similarity,
@@ -50,6 +51,10 @@ export function PatientsView({
   const [search, setSearch] = useState("");
   const [newTreatment, setNewTreatment] = useState("");
   const [cepFeedback, setCepFeedback] = useState("");
+  const parsedTreatments = useMemo(
+    () => parseTreatments(form.tratamento),
+    [form.tratamento],
+  );
 
   const deferredSearch = useDeferredValue(search);
   const allTreatments = useMemo(
@@ -57,9 +62,9 @@ export function PatientsView({
       uniqueTexts([
         ...DEFAULT_TREATMENTS,
         ...patients.flatMap((patient) => parseTreatments(patient.tratamento)),
-        ...parseTreatments(form.tratamento),
+        ...parsedTreatments,
       ]),
-    [form.tratamento, patients],
+    [parsedTreatments, patients],
   );
 
   const availableOrigins = useMemo(
@@ -100,12 +105,18 @@ export function PatientsView({
       return;
     }
 
+    if (selectedRequest.key === CREATE_NEW_KEY) {
+      selectPatient(null);
+      onSelectionHandled();
+      return;
+    }
+
     const nextPatient = patients.find(
-      (patient) => normalizeText(patient.nome) === selectedRequest.key,
+      (patient) => patientRecordKey(patient) === selectedRequest.key,
     );
 
     if (nextPatient) {
-      setSelectedKey(patientStorageKey(nextPatient));
+      setSelectedKey(patientRecordKey(nextPatient));
       setForm(patientToFormValues(nextPatient, columns));
     }
 
@@ -162,7 +173,7 @@ export function PatientsView({
   }, [form.cep]);
 
   function currentPatient() {
-    return patients.find((patient) => patientStorageKey(patient) === selectedKey) ?? null;
+    return patients.find((patient) => patientRecordKey(patient) === selectedKey) ?? null;
   }
 
   function selectPatient(patient: Patient | null) {
@@ -173,13 +184,13 @@ export function PatientsView({
       return;
     }
 
-    setSelectedKey(patientStorageKey(patient));
+    setSelectedKey(patientRecordKey(patient));
     setForm(patientToFormValues(patient, columns));
     setNewTreatment("");
   }
 
   function toggleTreatment(treatment: string) {
-    const current = parseTreatments(form.tratamento);
+    const current = parsedTreatments;
     const exists = current.some(
       (item) => normalizeText(item) === normalizeText(treatment),
     );
@@ -208,6 +219,8 @@ export function PatientsView({
     setNewTreatment("");
   }
 
+  const activePatient = currentPatient();
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -225,7 +238,7 @@ export function PatientsView({
     setCepFeedback("");
 
     try {
-      await onSavePatient(form, currentPatient());
+      await onSavePatient(form, activePatient);
       selectPatient(null);
     } finally {
       setSaving(false);
@@ -237,14 +250,15 @@ export function PatientsView({
       <aside className="panel">
         <div className="panel-title">
           <div>
-            <h2>Pacientes</h2>
+            <h2 className="panel-heading">Cadastros</h2>
             <p className="panel-subcopy">
               Selecione um cadastro existente para editar ou crie um novo.
             </p>
           </div>
-          <button className="btn btn-secondary" type="button" onClick={() => selectPatient(null)}>
-            Novo
-          </button>
+          <div className="panel-meta">
+            <span className="pill">{patients.length} no total</span>
+            <span className="pill">{filteredPatients.length} visiveis</span>
+          </div>
         </div>
 
         <label className="field">
@@ -273,9 +287,9 @@ export function PatientsView({
           {filteredPatients.map((patient) => (
             <button
               className={`patient-list-item ${
-                selectedKey === patientStorageKey(patient) ? "active" : ""
+                selectedKey === patientRecordKey(patient) ? "active" : ""
               }`}
-              key={patientStorageKey(patient)}
+              key={patientRecordKey(patient)}
               type="button"
               onClick={() => selectPatient(patient)}
             >
@@ -289,7 +303,11 @@ export function PatientsView({
       <form className="panel layout-grid" onSubmit={handleSubmit}>
         <div className="panel-title">
           <div>
-            <h2>{selectedKey === CREATE_NEW_KEY ? "Novo paciente" : "Editar paciente"}</h2>
+            <h2 className="panel-heading">
+              {selectedKey === CREATE_NEW_KEY
+                ? "Novo cadastro"
+                : `Editar ${activePatient?.nome || "cadastro"}`}
+            </h2>
             <p className="panel-subcopy">
               Preencha os dados do cadastro em um formulario web unico.
             </p>
@@ -297,7 +315,7 @@ export function PatientsView({
         </div>
 
         <section className="form-section">
-          <h3 className="section-heading">Origem e identificacao</h3>
+          <h3 className="section-heading">Origem e ID</h3>
           <div className="input-grid">
             <label className="field">
               <span>Origem do lead</span>
@@ -352,7 +370,7 @@ export function PatientsView({
         </section>
 
         <section className="form-section">
-          <h3 className="section-heading">Dados do paciente</h3>
+          <h3 className="section-heading">Dados principais</h3>
           <div className="input-grid">
             <label className="field">
               <span>Nome completo</span>
@@ -403,9 +421,9 @@ export function PatientsView({
           <div className="layout-grid">
             <div>
               <span className="section-label">Tratamentos</span>
-              <div className="chip-row" style={{ marginTop: 10 }}>
+              <div className="chip-row chip-row-spaced">
                 {allTreatments.map((treatment) => {
-                  const active = parseTreatments(form.tratamento).some(
+                  const active = parsedTreatments.some(
                     (item) => normalizeText(item) === normalizeText(treatment),
                   );
 
@@ -435,7 +453,7 @@ export function PatientsView({
                 </div>
               </label>
 
-              <div className="actions-row" style={{ alignItems: "end" }}>
+              <div className="actions-row actions-row-end">
                 <button className="btn btn-secondary" type="button" onClick={addCustomTreatment}>
                   Adicionar
                 </button>
@@ -528,7 +546,7 @@ export function PatientsView({
         </section>
 
         <section className="form-section">
-          <h3 className="section-heading">Endereco e filiacao</h3>
+          <h3 className="section-heading">Endereco e familia</h3>
           <div className="input-grid">
             <label className="field">
               <span>CEP</span>
@@ -660,7 +678,7 @@ export function PatientsView({
           <button
             className="btn"
             type="button"
-            onClick={() => selectPatient(currentPatient())}
+            onClick={() => selectPatient(activePatient)}
           >
             Recarregar formulario
           </button>
@@ -668,16 +686,4 @@ export function PatientsView({
       </form>
     </section>
   );
-}
-
-function patientStorageKey(patient: Patient) {
-  if (patient.id != null) {
-    return `id:${patient.id}`;
-  }
-
-  if (patient.cpf) {
-    return `cpf:${patient.cpf}`;
-  }
-
-  return `nome:${normalizeText(patient.nome)}`;
 }
