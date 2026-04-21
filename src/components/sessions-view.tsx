@@ -107,6 +107,7 @@ export function SessionsView({
       entries.length
     );
   }, [entries]);
+  const isPaid = useMemo(() => toNumber(form.valorPago) > 0, [form.valorPago]);
   const canSaveSession = useMemo(() => {
     const date = parseFlexibleDate(`${form.data}T${form.hora}`);
     if (!date) {
@@ -115,6 +116,14 @@ export function SessionsView({
 
     return Date.now() > date.getTime();
   }, [form.data, form.hora]);
+
+  function resolvePaidValue(nextValorSessao: string, paid: boolean) {
+    if (!paid) {
+      return "0";
+    }
+
+    return nextValorSessao.trim() || "0";
+  }
 
   function prefillFromEntry(entry: Entry) {
     setForm(entryToSessionForm(entry));
@@ -358,6 +367,10 @@ export function SessionsView({
                     setForm((current) => ({
                       ...current,
                       valorSessao: event.target.value,
+                      valorPago: resolvePaidValue(
+                        event.target.value,
+                        toNumber(current.valorPago) > 0,
+                      ),
                     }))
                   }
                 />
@@ -366,17 +379,28 @@ export function SessionsView({
 
             <label className="field">
               <span>Valor pago</span>
-              <div className="input-shell">
-                <input
-                  inputMode="decimal"
-                  value={form.valorPago}
-                  onChange={(event) =>
+              <div className="payment-toggle">
+                <span className={`payment-toggle-label ${!isPaid ? "active" : ""}`}>
+                  Nao
+                </span>
+                <button
+                  aria-checked={isPaid}
+                  aria-label={isPaid ? "Sessao marcada como paga" : "Sessao marcada como nao paga"}
+                  className={`payment-switch ${isPaid ? "active" : ""}`}
+                  role="switch"
+                  type="button"
+                  onClick={() =>
                     setForm((current) => ({
                       ...current,
-                      valorPago: event.target.value,
+                      valorPago: isPaid
+                        ? "0"
+                        : resolvePaidValue(current.valorSessao, true),
                     }))
                   }
                 />
+                <span className={`payment-toggle-label ${isPaid ? "active" : ""}`}>
+                  Pago
+                </span>
               </div>
             </label>
           </div>

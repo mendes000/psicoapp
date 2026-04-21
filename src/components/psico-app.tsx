@@ -1011,31 +1011,39 @@ export function PsicoApp() {
             </div>
 
             <div className="headline">
-              <div className="eyebrow">PsicoApp | Painel clinico</div>
+              <div className="hero-top-row">
+                <div className="eyebrow">PsicoApp | Painel clinico</div>
+                {initialLoadState === "ready" && (
+                  <nav className="nav-row nav-row-hero">
+                    {[
+                      ["painel", "Painel"],
+                      ["pacientes", "Pacientes"],
+                      ["sessoes", "Sessoes"],
+                      ["calendario", "Calendario"],
+                    ].map(([key, label]) => (
+                      <button
+                        className={`nav-chip ${activeView === key ? "active" : ""}`}
+                        key={key}
+                        type="button"
+                        onClick={() => setActiveView(key as AppView)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <button
+                      className="btn btn-danger btn-hero-logout"
+                      type="button"
+                      onClick={() => void handleSignOut()}
+                    >
+                      Sair
+                    </button>
+                  </nav>
+                )}
+              </div>
               <h1 className="headline-compact">
                 <span>Pacientes, sessoes e agenda</span>
                 <span>em um fluxo unico.</span>
               </h1>
-              <p>
-                Consulte cadastros, registre atendimentos e acompanhe a agenda sem
-                telas paralelas nem etapas herdadas da migracao.
-              </p>
-            </div>
-          </div>
-
-          <div className="session-badge">
-            <strong>{session.user.email}</strong>
-            <span>
-              {dataLoading
-                ? "Atualizando painel..."
-                : syncIssue
-                  ? "Mostrando ultimo estado disponivel"
-                  : "Sessao ativa"}
-            </span>
-            <div className="actions-row">
-              <button className="btn btn-danger" type="button" onClick={() => void handleSignOut()}>
-                Sair
-              </button>
             </div>
           </div>
         </header>
@@ -1093,62 +1101,43 @@ export function PsicoApp() {
 
           {initialLoadState === "ready" && (
             <>
-          <nav className="nav-row">
-            {[
-              ["painel", "Painel"],
-              ["pacientes", "Pacientes"],
-              ["sessoes", "Sessoes"],
-              ["calendario", "Calendario"],
-            ].map(([key, label]) => (
-              <button
-                className={`nav-chip ${activeView === key ? "active" : ""}`}
-                key={key}
-                type="button"
-                onClick={() => setActiveView(key as AppView)}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-
-          <div className="status-row">
-            <span className="pill">
-              {datasetPillText(
-                patients.length,
-                patientsStatus,
-                "{count} pacientes carregados",
-                "Carregando pacientes...",
-                "Pacientes sob demanda",
-              )}
-            </span>
-            <span className="pill">
-              {datasetPillText(
-                entries.length,
-                entriesStatus,
-                "{count} sessoes carregadas",
-                "Carregando sessoes...",
-                "Sessoes sob demanda",
-              )}
-            </span>
-            <span className="pill">
-              {datasetPillText(
-                schedules.length,
-                schedulesStatus,
-                "{count} agendamentos carregados",
-                "Carregando agenda...",
-                "Agenda sob demanda",
-              )}
-            </span>
-          </div>
+          {activeView !== "painel" && (
+            <div className="status-row">
+              <span className="pill">
+                {datasetPillText(
+                  patients.length,
+                  patientsStatus,
+                  "{count} pacientes carregados",
+                  "Carregando pacientes...",
+                  "Pacientes sob demanda",
+                )}
+              </span>
+              <span className="pill">
+                {datasetPillText(
+                  entries.length,
+                  entriesStatus,
+                  "{count} sessoes carregadas",
+                  "Carregando sessoes...",
+                  "Sessoes sob demanda",
+                )}
+              </span>
+              <span className="pill">
+                {datasetPillText(
+                  schedules.length,
+                  schedulesStatus,
+                  "{count} agendamentos carregados",
+                  "Carregando agenda...",
+                  "Agenda sob demanda",
+                )}
+              </span>
+            </div>
+          )}
 
           {activeView === "painel" && (
             <DashboardView
               initialSnapshot={dashboardSnapshot}
               onLoadSnapshot={loadDashboardSnapshot}
-              onCreatePatient={requestNewPatient}
-              onCreateSession={requestNewSession}
               onCreateSessionForPatient={requestNewSessionForPatient}
-              onOpenCalendar={() => setActiveView("calendario")}
               onOpenPatient={requestPatientEditor}
             />
           )}
