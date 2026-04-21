@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Manrope } from "next/font/google";
 
 import "./globals.css";
+import "./branding.css";
 
 const bodyFont = Manrope({
   subsets: ["latin"],
