@@ -482,6 +482,69 @@ export async function updateEntryFinancialRecord(args: {
   }
 }
 
+export async function updatePatientObservationRecord(args: {
+  nome: string;
+  cpf: string;
+  email: string;
+  telefone: string;
+  observacoes: string;
+  column?: string;
+}) {
+  const lookupName = String(args.nome ?? "").trim();
+  const lookupCpf = stripDigits(args.cpf);
+  const lookupEmail = String(args.email ?? "").trim();
+  const lookupPhone = String(args.telefone ?? "").trim();
+
+  if (!lookupName && !lookupCpf && !lookupEmail && !lookupPhone) {
+    throw new Error("Paciente sem identificador para atualizar observacoes.");
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  const candidateColumns = Array.from(
+    new Set(
+      [args.column, "observacoes", "observacoees"].filter(
+        (value): value is string => Boolean(value?.trim()),
+      ),
+    ),
+  );
+  let lastError: unknown = null;
+
+  for (const column of candidateColumns) {
+    let query = supabase
+      .from("pacientes")
+      .update(
+        updatePayload({
+          [column]: args.observacoes,
+        }),
+      );
+
+    if (lookupCpf) {
+      query = query.eq("cpf", lookupCpf);
+    } else if (lookupEmail) {
+      query = query.eq("email", lookupEmail);
+    } else if (lookupPhone) {
+      query = query.eq("telefone", lookupPhone);
+    } else {
+      query = query.eq("nome", lookupName);
+    }
+
+    const { data, error } = await query.select("id").limit(1);
+
+    if (!error && (data?.length ?? 0) > 0) {
+      return;
+    }
+
+    lastError =
+      error ?? new Error("Paciente nao encontrado para atualizar observacoes.");
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  throw new Error("Falha ao atualizar observacoes do paciente.");
+}
+
 export async function signOutSupabase() {
   const supabase = getSupabaseBrowserClient();
   const { error } = await supabase.auth.signOut();

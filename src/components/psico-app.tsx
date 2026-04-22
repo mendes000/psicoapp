@@ -25,6 +25,7 @@ import {
   saveSessionRecord,
   signOutSupabase,
   updateEntryFinancialRecord,
+  updatePatientObservationRecord,
   upsertPatientRecord,
 } from "../lib/data";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "../lib/supabase";
@@ -48,6 +49,7 @@ import {
   emptySessionForm,
   entryToSessionForm,
   formatDateTimeBr,
+  patientRecordKey,
 } from "../lib/utils";
 
 const NEW_PATIENT_REQUEST_KEY = "__new__";
@@ -937,6 +939,84 @@ export function PsicoApp() {
     }
   }
 
+  async function handleUpdatePatientObservation(args: {
+    patientKey: string;
+    nome: string;
+    cpf: string;
+    email: string;
+    telefone: string;
+    observacoes: string;
+  }) {
+    try {
+      await updatePatientObservationRecord({
+        ...args,
+        column: patientColumns.observacoes,
+      });
+      setSyncIssue("");
+
+      let patientUpdated = false;
+      const nextPatients = patients.map((patient) => {
+        if (patientRecordKey(patient) !== args.patientKey) {
+          return patient;
+        }
+
+        patientUpdated = true;
+        return {
+          ...patient,
+          observacoes: args.observacoes,
+          observacoees: args.observacoes,
+        };
+      });
+
+      let snapshotUpdated = false;
+      const nextDashboardSnapshot = dashboardSnapshot
+        ? {
+            ...dashboardSnapshot,
+            items: dashboardSnapshot.items.map((patient) => {
+              if (patient.patientKey !== args.patientKey) {
+                return patient;
+              }
+
+              snapshotUpdated = true;
+              return {
+                ...patient,
+                observacoes: args.observacoes,
+              };
+            }),
+          }
+        : null;
+
+      startTransition(() => {
+        if (patientUpdated) {
+          setPatients(nextPatients);
+        }
+
+        if (snapshotUpdated && nextDashboardSnapshot) {
+          setDashboardSnapshot(nextDashboardSnapshot);
+        }
+      });
+
+      if (loadedUserIdRef.current) {
+        if (patientUpdated) {
+          persistDatasetCache(loadedUserIdRef.current, "patients", nextPatients);
+        }
+
+        if (snapshotUpdated && nextDashboardSnapshot) {
+          persistCacheValue(loadedUserIdRef.current, "dashboard", nextDashboardSnapshot);
+        }
+      }
+    } catch (error) {
+      setFlash({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Falha ao atualizar as observacoes do prontuario.",
+      });
+      throw error;
+    }
+  }
+
   function requestNewPatient() {
     setSessionSeed(null);
     setSelectedPatientRequest({
@@ -1171,6 +1251,7 @@ export function PsicoApp() {
               onEditPatient={requestPatientEdition}
               onLoadSnapshot={loadDashboardSnapshot}
               onUpdateFinancialEntry={handleUpdateEntryFinancial}
+              onUpdatePatientObservation={handleUpdatePatientObservation}
             />
           )}
 

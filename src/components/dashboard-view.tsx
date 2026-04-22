@@ -22,6 +22,14 @@ interface DashboardViewProps {
     reviewOnly?: boolean;
     itemLimit?: number;
   }) => Promise<DashboardSnapshot>;
+  onUpdatePatientObservation: (args: {
+    patientKey: string;
+    nome: string;
+    cpf: string;
+    email: string;
+    telefone: string;
+    observacoes: string;
+  }) => Promise<void>;
   onUpdateFinancialEntry: (args: {
     entryId: Entry["id"];
     valorPago: number;
@@ -48,6 +56,7 @@ export function DashboardView({
   onEditPatient,
   onLoadSnapshot,
   onUpdateFinancialEntry,
+  onUpdatePatientObservation,
 }: DashboardViewProps) {
   const [reviewOnly, setReviewOnly] = useState(false);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(initialSnapshot);
@@ -356,6 +365,7 @@ export function DashboardView({
                   entries={entries}
                   onEditPatient={onEditPatient}
                   onUpdateFinancialEntry={onUpdateFinancialEntry}
+                  onUpdatePatientObservation={onUpdatePatientObservation}
                   patient={patient}
                 />
               </details>
@@ -371,6 +381,7 @@ function PatientRecord({
   entries,
   onEditPatient,
   onUpdateFinancialEntry,
+  onUpdatePatientObservation,
   patient,
 }: {
   entries: Entry[];
@@ -379,6 +390,14 @@ function PatientRecord({
     entryId: Entry["id"];
     valorPago: number;
     obs: string;
+  }) => Promise<void>;
+  onUpdatePatientObservation: (args: {
+    patientKey: string;
+    nome: string;
+    cpf: string;
+    email: string;
+    telefone: string;
+    observacoes: string;
   }) => Promise<void>;
   patient: DashboardSnapshot["items"][number];
 }) {
@@ -456,6 +475,7 @@ function PatientRecord({
         onEditPatient={onEditPatient}
         onToggleShowAllSessions={() => setShowAllSessions((current) => !current)}
         onUpdateFinancialEntry={onUpdateFinancialEntry}
+        onUpdatePatientObservation={onUpdatePatientObservation}
         patientEntries={patientEntries}
         patient={patient}
         showAllSessions={showAllSessions}
@@ -469,6 +489,7 @@ function PatientTabsContent({
   onEditPatient,
   onToggleShowAllSessions,
   onUpdateFinancialEntry,
+  onUpdatePatientObservation,
   patientEntries,
   patient,
   showAllSessions,
@@ -480,6 +501,14 @@ function PatientTabsContent({
     entryId: Entry["id"];
     valorPago: number;
     obs: string;
+  }) => Promise<void>;
+  onUpdatePatientObservation: (args: {
+    patientKey: string;
+    nome: string;
+    cpf: string;
+    email: string;
+    telefone: string;
+    observacoes: string;
   }) => Promise<void>;
   patientEntries: Entry[];
   patient: DashboardSnapshot["items"][number];
@@ -557,6 +586,12 @@ function PatientTabsContent({
 
       {activeTab === "prontuario" && (
         <>
+          {patient.hasPatientRecord && (
+            <EditableProntuarioObservation
+              onUpdatePatientObservation={onUpdatePatientObservation}
+              patient={patient}
+            />
+          )}
           <section className="layout-grid">
             <div className="section-heading-row">
               <h3 className="section-heading">
@@ -654,6 +689,99 @@ function PatientTabsContent({
         </section>
       )}
     </div>
+  );
+}
+
+function EditableProntuarioObservation({
+  onUpdatePatientObservation,
+  patient,
+}: {
+  onUpdatePatientObservation: (args: {
+    patientKey: string;
+    nome: string;
+    cpf: string;
+    email: string;
+    telefone: string;
+    observacoes: string;
+  }) => Promise<void>;
+  patient: DashboardSnapshot["items"][number];
+}) {
+  const currentValue = String(patient.observacoes ?? "").trim();
+  const canEdit =
+    patient.hasPatientRecord &&
+    Boolean(
+      patient.cpf ||
+        patient.email ||
+        patient.telefone ||
+        patient.reviewState !== "duplicate-name",
+    );
+  const [draft, setDraft] = useState(currentValue);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(currentValue);
+  }, [currentValue, patient.key]);
+
+  async function handleBlur() {
+    const nextValue = draft.trim();
+
+    if (!canEdit || saving || currentValue === nextValue) {
+      if (currentValue !== draft) {
+        setDraft(currentValue);
+      }
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      await onUpdatePatientObservation({
+        patientKey: patient.patientKey,
+        nome: patient.nome,
+        cpf: patient.cpf,
+        email: patient.email,
+        telefone: patient.telefone,
+        observacoes: nextValue,
+      });
+    } catch {
+      setDraft(currentValue);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="layout-grid">
+      <div className="section-heading-row">
+        <h3 className="section-heading">Observacoes</h3>
+        <span className="compact-editor-status">
+          {saving
+            ? "Salvando..."
+            : canEdit
+              ? "Salva ao sair do campo"
+              : "Edicao indisponivel para homonimos sem identificador"}
+        </span>
+      </div>
+      <div className="prontuario-observation-shell">
+        <textarea
+          className="prontuario-observation-editor"
+          disabled={!canEdit || saving}
+          placeholder={
+            canEdit
+              ? "Registrar observacoes do prontuario..."
+              : "Adicione um identificador ao cadastro para liberar esta edicao."
+          }
+          value={draft}
+          onBlur={() => void handleBlur()}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+        />
+      </div>
+    </section>
   );
 }
 
