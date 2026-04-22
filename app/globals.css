@@ -675,6 +675,10 @@ button {
   display: none;
 }
 
+.stack-card:not([open]) .record-tabs {
+  display: none;
+}
+
 .stack-summary {
   display: flex;
   flex-wrap: wrap;
@@ -684,7 +688,10 @@ button {
 }
 
 .stack-summary-with-tabs {
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  width: 100%;
 }
 
 .stack-summary strong,
@@ -770,6 +777,7 @@ button {
 .patient-summary-main {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .patient-summary-heading {
@@ -784,49 +792,204 @@ button {
   font-weight: 400;
 }
 
-.detail-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.stack-summary-with-tabs .record-tabs {
+  align-self: start;
 }
 
-.detail-item {
+.section-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-action-btn {
+  border: 1px solid rgba(20, 149, 213, 0.16);
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(20, 149, 213, 0.08);
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.section-action-btn:hover,
+.section-action-btn:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(20, 149, 213, 0.32);
+  background: rgba(20, 149, 213, 0.12);
+}
+
+.compact-detail-list {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.64);
   border: 1px solid rgba(20, 149, 213, 0.08);
   border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
 }
 
-.detail-item label {
+.compact-detail-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(20, 149, 213, 0.08);
+}
+
+.compact-detail-row:last-child {
+  border-bottom: 0;
+}
+
+.compact-detail-label {
   color: var(--muted);
   font-size: 0.84rem;
 }
 
-.detail-item strong {
-  font-size: 0.98rem;
+.compact-detail-value {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.compact-entry-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-inline-row,
+.compact-finance-row {
+  display: grid;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(20, 149, 213, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.compact-inline-row {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.compact-finance-table {
+  display: grid;
+  gap: 2px;
+}
+
+.compact-finance-head,
+.compact-finance-row {
+  grid-template-columns: max-content minmax(260px, 1fr);
+}
+
+.compact-finance-head {
+  display: grid;
+  align-items: center;
+  gap: 18px;
+  padding: 0 12px 2px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.compact-finance-meta-head,
+.compact-finance-meta {
+  display: grid;
+  grid-template-columns: 132px 132px 72px;
+  align-items: center;
+  gap: 14px;
+}
+
+.compact-inline-date {
+  font-size: 0.96rem;
+  line-height: 1.35;
+}
+
+.compact-inline-value {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.compact-inline-placeholder {
+  color: rgba(100, 134, 154, 0.72);
+  font-size: 0.88rem;
   line-height: 1.45;
 }
 
-.session-list {
-  display: grid;
-  gap: 10px;
-}
-
-.session-row {
-  display: grid;
+.compact-finance-row {
+  align-items: center;
   gap: 8px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(20, 149, 213, 0.08);
+  padding: 1.5px 8px;
 }
 
-.session-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
+.compact-finance-row .compact-inline-date,
+.compact-finance-row .compact-inline-value,
+.compact-finance-row .compact-inline-placeholder {
+  line-height: 1.2;
+}
+
+.compact-observation-editor {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(20, 149, 213, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  outline: 0;
+}
+
+.compact-observation-editor::placeholder {
+  color: rgba(100, 134, 154, 0.72);
+}
+
+.compact-observation-editor:focus {
+  border-color: rgba(20, 149, 213, 0.28);
+  box-shadow: 0 0 0 3px rgba(20, 149, 213, 0.08);
+}
+
+.compact-observation-editor:disabled,
+.compact-finance-payment .payment-switch:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.compact-finance-payment {
+  align-self: center;
+  justify-self: start;
+}
+
+.finance-toggle {
+  justify-content: flex-start;
+  min-height: auto;
+  gap: 0;
+}
+
+.finance-toggle .payment-switch {
+  width: 34px;
+  height: 20px;
+}
+
+.finance-toggle .payment-switch::after {
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+}
+
+.finance-toggle .payment-switch.active::after {
+  transform: translateX(14px);
+}
+
+.session-payment-toggle {
+  min-height: 48px;
+  gap: 12px;
 }
 
 .patient-list {
@@ -1245,10 +1408,6 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .detail-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .input-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1281,7 +1440,6 @@ button {
   }
 
   .stats-grid,
-  .detail-grid,
   .input-grid {
     grid-template-columns: 1fr;
   }
@@ -1305,5 +1463,33 @@ button {
     margin-top: 0;
     margin-bottom: 0;
     pointer-events: auto;
+  }
+
+  .compact-detail-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .compact-finance-head,
+  .compact-inline-row,
+  .compact-finance-row {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-finance-meta {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .compact-finance-head {
+    display: none;
+  }
+
+  .stack-summary-with-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .stack-summary-with-tabs .record-tabs {
+    justify-self: start;
   }
 }

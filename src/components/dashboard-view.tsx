@@ -2,24 +2,31 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
-import type { DashboardSnapshot } from "../lib/types";
+import type { DashboardSnapshot, Entry } from "../lib/types";
 import {
   calculateAge,
   formatCurrency,
   formatDateBr,
   formatDateTimeBr,
   normalizeText,
+  parseFlexibleDate,
+  toNumber,
 } from "../lib/utils";
 
 interface DashboardViewProps {
+  entries: Entry[];
   initialSnapshot: DashboardSnapshot | null;
+  onEditPatient: (patientKey: string) => void;
   onLoadSnapshot: (options?: {
     search?: string;
     reviewOnly?: boolean;
     itemLimit?: number;
   }) => Promise<DashboardSnapshot>;
-  onOpenPatient: (patientKey: string) => void;
-  onCreateSessionForPatient: (name: string) => void;
+  onUpdateFinancialEntry: (args: {
+    entryId: Entry["id"];
+    valorPago: number;
+    obs: string;
+  }) => Promise<void>;
 }
 
 const EMPTY_SNAPSHOT: DashboardSnapshot = {
@@ -36,14 +43,16 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
 };
 
 export function DashboardView({
+  entries,
   initialSnapshot,
+  onEditPatient,
   onLoadSnapshot,
-  onOpenPatient,
-  onCreateSessionForPatient,
+  onUpdateFinancialEntry,
 }: DashboardViewProps) {
   const [reviewOnly, setReviewOnly] = useState(false);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(initialSnapshot);
   const [allItemsSnapshot, setAllItemsSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [openPatientKey, setOpenPatientKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -161,6 +170,17 @@ export function DashboardView({
 
     return source.filter((patient) => selectedSet.has(patient.nome));
   }, [activeSnapshot.items, allItemsSnapshot?.items, reviewOnly, selectedNames]);
+
+  useEffect(() => {
+    if (!openPatientKey) {
+      return;
+    }
+
+    const stillVisible = visible.some((patient) => patient.key === openPatientKey);
+    if (!stillVisible) {
+      setOpenPatientKey(null);
+    }
+  }, [openPatientKey, visible]);
 
   async function ensureAllItemsLoaded() {
     if (allItemsSnapshot || optionsLoading) {
@@ -319,9 +339,23 @@ export function DashboardView({
               <details
                 className="stack-card reveal"
                 key={patient.key}
+                open={openPatientKey === patient.key}
                 style={{ animationDelay: `${Math.min(index * 40, 240)}ms` }}
+                onToggle={(event) => {
+                  const isOpen = event.currentTarget.open;
+                  setOpenPatientKey((current) =>
+                    isOpen
+                      ? patient.key
+                      : current === patient.key
+                        ? null
+                        : current,
+                  );
+                }}
               >
                 <PatientRecord
+                  entries={entries}
+                  onEditPatient={onEditPatient}
+                  onUpdateFinancialEntry={onUpdateFinancialEntry}
                   patient={patient}
                 />
               </details>
@@ -334,11 +368,33 @@ export function DashboardView({
 }
 
 function PatientRecord({
+  entries,
+  onEditPatient,
+  onUpdateFinancialEntry,
   patient,
 }: {
+  entries: Entry[];
+  onEditPatient: (patientKey: string) => void;
+  onUpdateFinancialEntry: (args: {
+    entryId: Entry["id"];
+    valorPago: number;
+    obs: string;
+  }) => Promise<void>;
   patient: DashboardSnapshot["items"][number];
 }) {
   const [activeTab, setActiveTab] = useState<"ficha" | "prontuario" | "financas">("ficha");
+  const [showAllSessions, setShowAllSessions] = useState(false);
+  const patientEntries = useMemo(() => {
+    const patientKey = normalizeText(patient.nome);
+    const source = entries.filter((entry) => normalizeText(String(entry.nome ?? "")) === patientKey);
+    const items = source.length > 0 ? source : patient.ultimasSessoes;
+
+    return [...items].sort((left, right) => {
+      const leftTime = parseFlexibleDate(left.data)?.getTime() ?? 0;
+      const rightTime = parseFlexibleDate(right.data)?.getTime() ?? 0;
+      return rightTime - leftTime;
+    });
+  }, [entries, patient]);
 
   return (
     <>
@@ -361,7 +417,6 @@ function PatientRecord({
                 <span>Historico sem vinculo automatico</span>
               )}
               {patient.tratamento && <span>{patient.tratamento}</span>}
-              {patient.cpf && <span>CPF {patient.cpf}</span>}
             </div>
           </div>
 
@@ -398,7 +453,12 @@ function PatientRecord({
 
       <PatientTabsContent
         activeTab={activeTab}
+        onEditPatient={onEditPatient}
+        onToggleShowAllSessions={() => setShowAllSessions((current) => !current)}
+        onUpdateFinancialEntry={onUpdateFinancialEntry}
+        patientEntries={patientEntries}
         patient={patient}
+        showAllSessions={showAllSessions}
       />
     </>
   );
@@ -406,11 +466,53 @@ function PatientRecord({
 
 function PatientTabsContent({
   activeTab,
+  onEditPatient,
+  onToggleShowAllSessions,
+  onUpdateFinancialEntry,
+  patientEntries,
   patient,
+  showAllSessions,
 }: {
   activeTab: "ficha" | "prontuario" | "financas";
+  onEditPatient: (patientKey: string) => void;
+  onToggleShowAllSessions: () => void;
+  onUpdateFinancialEntry: (args: {
+    entryId: Entry["id"];
+    valorPago: number;
+    obs: string;
+  }) => Promise<void>;
+  patientEntries: Entry[];
   patient: DashboardSnapshot["items"][number];
+  showAllSessions: boolean;
 }) {
+  const hasMoreProntuarioSessions = patientEntries.length > patient.ultimasSessoes.length;
+  const hasMoreFinanceSessions = patientEntries.length > 10;
+  const prontuarioEntries = showAllSessions ? patientEntries : patient.ultimasSessoes;
+  const financeEntries = showAllSessions ? patientEntries : patientEntries.slice(0, 10);
+  const personalItems: Array<[label: string, value: string]> = [
+    ["Nascimento", formatDateBr(patient.nascimento)],
+    ["Idade", calculateAge(patient.nascimento)],
+    ["CPF", patient.cpf],
+    ["Profissao", patient.profissao],
+    ["Origem", patient.origem],
+    ["Quem indicou", patient.quemIndicou],
+  ];
+  const contactItems: Array<[label: string, value: string]> = [
+    ["Telefone", patient.telefone],
+    ["Email", patient.email],
+    ["Contato emergencia", patient.contatoEmergencia],
+    ["Nome contato", patient.nomeContato],
+    ["Endereco", patient.endereco],
+    ["Bairro", patient.bairro],
+    ["Cidade", patient.cidade],
+    ["CEP", patient.cep],
+  ];
+  const familyItems: Array<[label: string, value: string]> = [
+    ["Nome do pai", patient.nomePai],
+    ["Nome da mae", patient.nomeMae],
+    ["Observacoes", patient.observacoes],
+  ];
+
   return (
     <div className="stack-body">
       {activeTab === "ficha" && (
@@ -422,79 +524,65 @@ function PatientTabsContent({
             </div>
           )}
 
-          <div className="detail-grid">
-            <div className="detail-item">
-              <label>Sessoes</label>
-              <strong>{patient.totalSessoes}</strong>
-            </div>
-            <div className="detail-item">
-              <label>Total pago</label>
-              <strong>{formatCurrency(patient.totalPago)}</strong>
-            </div>
-            <div className="detail-item">
-              <label>Saldo</label>
-              <strong>{formatCurrency(patient.saldo)}</strong>
-            </div>
-          </div>
-
           {patient.hasPatientRecord && (
             <>
               <section className="layout-grid">
-                <h3 className="section-heading">Dados pessoais</h3>
-                <div className="detail-grid">
-                  <Detail label="Nascimento" value={formatDateBr(patient.nascimento)} />
-                  <Detail label="Idade" value={calculateAge(patient.nascimento)} />
-                  <Detail label="CPF" value={patient.cpf} />
-                  <Detail label="Profissao" value={patient.profissao} />
-                  <Detail label="Origem" value={patient.origem} />
-                  <Detail label="Quem indicou" value={patient.quemIndicou} />
+                <div className="section-heading-row">
+                  <h3 className="section-heading">Ficha do paciente</h3>
+                  <button
+                    className="section-action-btn"
+                    type="button"
+                    onClick={() => onEditPatient(patient.patientKey)}
+                  >
+                    Editar
+                  </button>
                 </div>
+
+                <CompactDetailList items={personalItems} />
               </section>
 
-              <section className="layout-grid">
-                <h3 className="section-heading">Contato e endereco</h3>
-                <div className="detail-grid">
-                  <Detail label="Telefone" value={patient.telefone} />
-                  <Detail label="Email" value={patient.email} />
-                  <Detail label="Contato emergencia" value={patient.contatoEmergencia} />
-                  <Detail label="Nome contato" value={patient.nomeContato} />
-                  <Detail label="Endereco" value={patient.endereco} />
-                  <Detail label="Bairro" value={patient.bairro} />
-                  <Detail label="Cidade" value={patient.cidade} />
-                  <Detail label="CEP" value={patient.cep} />
-                </div>
-              </section>
+              <CompactDetailSection
+                items={contactItems}
+                title="Contato e endereco"
+              />
 
-              <section className="layout-grid">
-                <h3 className="section-heading">Familia e observacoes</h3>
-                <div className="detail-grid">
-                  <Detail label="Nome do pai" value={patient.nomePai} />
-                  <Detail label="Nome da mae" value={patient.nomeMae} />
-                  <Detail
-                    label="Observacoes"
-                    value={patient.observacoes}
-                    className="detail-item"
-                  />
-                </div>
-              </section>
+              <CompactDetailSection
+                items={familyItems}
+                title="Familia e observacoes"
+              />
             </>
           )}
+        </>
+      )}
 
+      {activeTab === "prontuario" && (
+        <>
           <section className="layout-grid">
-            <h3 className="section-heading">
-              {patient.hasPatientRecord ? "Ultimas sessoes" : "Historico encontrado"}
-            </h3>
-            {patient.ultimasSessoes.length === 0 ? (
+            <div className="section-heading-row">
+              <h3 className="section-heading">
+                {patient.hasPatientRecord ? "Ultimas sessoes" : "Historico encontrado"}
+              </h3>
+              {hasMoreProntuarioSessions && (
+                <button
+                  className="section-action-btn"
+                  type="button"
+                  onClick={onToggleShowAllSessions}
+                >
+                  {showAllSessions ? "Mostrar ultimas sessoes" : "Mostrar todas as sessoes"}
+                </button>
+              )}
+            </div>
+            {prontuarioEntries.length === 0 ? (
               <div className="empty-state">
                 {patient.hasPatientRecord
                   ? "Nenhuma sessao encontrada para este paciente."
                   : "Nenhuma sessao encontrada para este historico."}
               </div>
             ) : (
-              <div className="session-list">
-                {patient.ultimasSessoes.map((entry, index) => (
+              <div className="compact-entry-stack">
+                {prontuarioEntries.map((entry, index) => (
                   <article
-                    className="session-row"
+                    className="compact-inline-row"
                     key={[
                       patient.key,
                       entry.id ?? "sem-id",
@@ -502,14 +590,18 @@ function PatientTabsContent({
                       index,
                     ].join("-")}
                   >
-                    <div className="session-meta">
-                      <strong>{formatDateTimeBr(entry.data)}</strong>
-                      <span>{entry.tipo || "Sem tipo"}</span>
-                      <span>Sessao {formatCurrency(entry.valor_sessao)}</span>
-                      <span>Pago {formatCurrency(entry.valor_pago)}</span>
-                    </div>
-                    {entry.obs && <span>{entry.obs}</span>}
-                    {entry.anotacoes_clinicas && <span>{entry.anotacoes_clinicas}</span>}
+                    <strong className="compact-inline-date">
+                      {formatDateTimeBr(entry.data)}
+                    </strong>
+                    {String(entry.anotacoes_clinicas ?? "").trim() ? (
+                      <span className="compact-inline-value">
+                        {String(entry.anotacoes_clinicas ?? "").trim()}
+                      </span>
+                    ) : (
+                      <span className="compact-inline-placeholder">
+                        (campo nao preenchido)
+                      </span>
+                    )}
                   </article>
                 ))}
               </div>
@@ -517,27 +609,218 @@ function PatientTabsContent({
           </section>
         </>
       )}
-
-      {activeTab === "prontuario" && <div className="empty-state">Em branco por enquanto.</div>}
-      {activeTab === "financas" && <div className="empty-state">Em branco por enquanto.</div>}
+      {activeTab === "financas" && (
+        <section className="layout-grid">
+          <div className="section-heading-row">
+            <h3 className="section-heading">Sessoes</h3>
+            {hasMoreFinanceSessions && (
+              <button
+                className="section-action-btn"
+                type="button"
+                onClick={onToggleShowAllSessions}
+              >
+                {showAllSessions ? "Mostrar ultimas sessoes" : "Mostrar todas as sessoes"}
+              </button>
+            )}
+          </div>
+          {financeEntries.length === 0 ? (
+            <div className="empty-state">Nenhuma sessao encontrada para este paciente.</div>
+          ) : (
+            <div className="compact-finance-table">
+              <div className="compact-finance-head">
+                <div className="compact-finance-meta-head">
+                  <span>Data</span>
+                  <span>Valor da sessao</span>
+                  <span>Pagamento</span>
+                </div>
+                <span>Observacoes</span>
+              </div>
+              {financeEntries.map((entry, index) => {
+                return (
+                  <EditableFinanceRow
+                    entry={entry}
+                    key={[
+                      patient.key,
+                      entry.id ?? "sem-id",
+                      entry.data ?? "sem-data",
+                      index,
+                    ].join("-")}
+                    onUpdateFinancialEntry={onUpdateFinancialEntry}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
 
-function Detail({
-  label,
-  value,
-  className,
+function CompactDetailList({
+  fallbackItem,
+  items,
 }: {
-  label: string;
-  value: string;
-  className?: string;
+  fallbackItem?: [label: string, value: string];
+  items: Array<[label: string, value: string]>;
 }) {
+  const filledItems = items.filter(([, value]) => String(value ?? "").trim());
+
+  if (filledItems.length === 0) {
+    if (!fallbackItem) {
+      return null;
+    }
+
+    filledItems.push(fallbackItem);
+  }
+
   return (
-    <div className={className ?? "detail-item"}>
-      <label>{label}</label>
-      <strong>{value || "-"}</strong>
+    <div className="compact-detail-list">
+      {filledItems.map(([label, value]) => (
+        <div className="compact-detail-row" key={label}>
+          <span className="compact-detail-label">{label}</span>
+          <strong className="compact-detail-value">{value}</strong>
+        </div>
+      ))}
     </div>
   );
 }
+
+function CompactDetailSection({
+  items,
+  title,
+}: {
+  items: Array<[label: string, value: string]>;
+  title: string;
+}) {
+  const filledItems = items.filter(([, value]) => String(value ?? "").trim());
+
+  if (filledItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="layout-grid">
+      <h3 className="section-heading">{title}</h3>
+      <CompactDetailList items={filledItems} />
+    </section>
+  );
+}
+
+function EditableFinanceRow({
+  entry,
+  onUpdateFinancialEntry,
+}: {
+  entry: Entry;
+  onUpdateFinancialEntry: (args: {
+    entryId: Entry["id"];
+    valorPago: number;
+    obs: string;
+  }) => Promise<void>;
+}) {
+  const entryId = entry.id;
+  const canEdit = entryId !== null && entryId !== undefined && entryId !== "";
+  const paidFromEntry = toNumber(entry.valor_pago) > 0;
+  const [isPaid, setIsPaid] = useState(paidFromEntry);
+  const [observationDraft, setObservationDraft] = useState(String(entry.obs ?? "").trim());
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setIsPaid(paidFromEntry);
+  }, [paidFromEntry]);
+
+  useEffect(() => {
+    setObservationDraft(String(entry.obs ?? "").trim());
+  }, [entry.id, entry.obs]);
+
+  async function persist(nextState?: { isPaid?: boolean; obs?: string }) {
+    if (!canEdit) {
+      return;
+    }
+
+    const nextPaid = nextState?.isPaid ?? isPaid;
+    const nextObs = nextState?.obs ?? observationDraft;
+
+    setSaving(true);
+    try {
+      await onUpdateFinancialEntry({
+        entryId,
+        valorPago: nextPaid ? toNumber(entry.valor_sessao) : 0,
+        obs: nextObs,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggle() {
+    if (!canEdit || saving) {
+      return;
+    }
+
+    const nextPaid = !isPaid;
+    setIsPaid(nextPaid);
+
+    try {
+      await persist({ isPaid: nextPaid });
+    } catch {
+      setIsPaid(paidFromEntry);
+    }
+  }
+
+  async function handleObservationBlur() {
+    const currentValue = String(entry.obs ?? "").trim();
+    const nextValue = observationDraft.trim();
+
+    if (!canEdit || saving || currentValue === nextValue) {
+      if (currentValue !== observationDraft) {
+        setObservationDraft(currentValue);
+      }
+      return;
+    }
+
+    try {
+      await persist({ obs: nextValue });
+    } catch {
+      setObservationDraft(currentValue);
+    }
+  }
+
+  return (
+    <article className="compact-finance-row">
+      <div className="compact-finance-meta">
+        <strong className="compact-inline-date">{formatDateBr(entry.data)}</strong>
+        <strong className="compact-inline-value">
+          {formatCurrency(entry.valor_sessao)}
+        </strong>
+        <div className="payment-toggle finance-toggle compact-finance-payment">
+          <button
+            aria-checked={isPaid}
+            aria-label={isPaid ? "Sessao paga" : "Sessao nao paga"}
+            className={`payment-switch ${isPaid ? "active" : ""}`}
+            disabled={!canEdit || saving}
+            role="switch"
+            tabIndex={canEdit ? 0 : -1}
+            type="button"
+            onClick={() => void handleToggle()}
+          />
+        </div>
+      </div>
+      <input
+        className="compact-observation-editor"
+        disabled={!canEdit || saving}
+        placeholder="(campo nao preenchido)"
+        value={observationDraft}
+        onBlur={() => void handleObservationBlur()}
+        onChange={(event) => setObservationDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </article>
+  );
+}
+
 

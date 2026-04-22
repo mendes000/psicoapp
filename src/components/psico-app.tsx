@@ -24,6 +24,7 @@ import {
   loadSchedules,
   saveSessionRecord,
   signOutSupabase,
+  updateEntryFinancialRecord,
   upsertPatientRecord,
 } from "../lib/data";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "../lib/supabase";
@@ -41,6 +42,7 @@ import type {
   SessionSeed,
 } from "../lib/types";
 import {
+  buildDashboardSnapshot,
   buildCalendarEvents,
   collectPatientColumns,
   emptySessionForm,
@@ -894,12 +896,45 @@ export function PsicoApp() {
     }
   }
 
-  function requestPatientEditor(key: string) {
-    setSessionSeed(null);
-    setSelectedPatientRequest({
-      key,
-    });
-    setActiveView("pacientes");
+  async function handleUpdateEntryFinancial(args: {
+    entryId: Entry["id"];
+    valorPago: number;
+    obs: string;
+  }) {
+    try {
+      await updateEntryFinancialRecord(args);
+      setSyncIssue("");
+      const nextEntries = entries.map((entry) =>
+        entry.id === args.entryId
+          ? {
+              ...entry,
+              valor_pago: args.valorPago,
+              obs: args.obs,
+            }
+          : entry,
+      );
+
+      const nextDashboardSnapshot = buildDashboardSnapshot(patients, nextEntries);
+
+      startTransition(() => {
+        setEntries(nextEntries);
+        setDashboardSnapshot(nextDashboardSnapshot);
+      });
+
+      if (loadedUserIdRef.current) {
+        persistDatasetCache(loadedUserIdRef.current, "entries", nextEntries);
+        persistCacheValue(loadedUserIdRef.current, "dashboard", nextDashboardSnapshot);
+      }
+    } catch (error) {
+      setFlash({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Falha ao atualizar os dados financeiros da sessao.",
+      });
+      throw error;
+    }
   }
 
   function requestNewPatient() {
@@ -914,16 +949,6 @@ export function PsicoApp() {
     setSelectedPatientRequest(null);
     setSessionSeed({
       form: emptySessionForm(),
-    });
-    setActiveView("sessoes");
-  }
-
-  function requestNewSessionForPatient(name: string) {
-    setSelectedPatientRequest(null);
-    setSessionSeed({
-      form: emptySessionForm({
-        nome: name,
-      }),
     });
     setActiveView("sessoes");
   }
@@ -957,6 +982,12 @@ export function PsicoApp() {
 
   function handleSessionSeedConsumed() {
     setSessionSeed(null);
+  }
+
+  function requestPatientEdition(patientKey: string) {
+    setSessionSeed(null);
+    setSelectedPatientRequest({ key: patientKey });
+    setActiveView("pacientes");
   }
 
   if (!configured) {
@@ -1135,10 +1166,11 @@ export function PsicoApp() {
 
           {activeView === "painel" && (
             <DashboardView
+              entries={entries}
               initialSnapshot={dashboardSnapshot}
+              onEditPatient={requestPatientEdition}
               onLoadSnapshot={loadDashboardSnapshot}
-              onCreateSessionForPatient={requestNewSessionForPatient}
-              onOpenPatient={requestPatientEditor}
+              onUpdateFinancialEntry={handleUpdateEntryFinancial}
             />
           )}
 

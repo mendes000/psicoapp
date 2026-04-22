@@ -379,7 +379,7 @@ export function SessionsView({
 
             <label className="field">
               <span>Valor pago</span>
-              <div className="payment-toggle">
+              <div className="payment-toggle finance-toggle session-payment-toggle">
                 <span className={`payment-toggle-label ${!isPaid ? "active" : ""}`}>
                   Nao
                 </span>

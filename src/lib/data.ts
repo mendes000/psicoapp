@@ -457,6 +457,31 @@ export async function saveSessionRecord(
   return { remarcar: false };
 }
 
+export async function updateEntryFinancialRecord(args: {
+  entryId: IdValue;
+  valorPago: number;
+  obs: string;
+}) {
+  if (!hasIdentifier(args.entryId)) {
+    throw new Error("Sessao sem identificador para atualizacao.");
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  const payload = updatePayload({
+    valor_pago: args.valorPago,
+    obs: args.obs,
+  });
+
+  const { error } = await supabase
+    .from("entradas")
+    .update(payload)
+    .eq("id", args.entryId as never);
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function signOutSupabase() {
   const supabase = getSupabaseBrowserClient();
   const { error } = await supabase.auth.signOut();
