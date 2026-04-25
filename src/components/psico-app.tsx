@@ -1113,50 +1113,36 @@ export function PsicoApp() {
   }
 
   return (
-    <main className="page-shell">
-      <div className="shell-card app-frame">
-        <header className="topbar">
-          <div className="brand-lockup brand-lockup-hero">
-            <div className="brand-mark-shell">
-              <AppLogo className="brand-mark-image" priority />
-            </div>
-
-            <div className="headline">
-              <div className="hero-top-row">
-                <div className="eyebrow">PsicoApp | Painel clinico</div>
-                {initialLoadState === "ready" && (
-                  <nav className="nav-row nav-row-hero">
-                    {[
-                      ["painel", "Painel"],
-                      ["pacientes", "Pacientes"],
-                      ["sessoes", "Sessoes"],
-                      ["calendario", "Calendario"],
-                    ].map(([key, label]) => (
-                      <button
-                        className={`nav-chip ${activeView === key ? "active" : ""}`}
-                        key={key}
-                        type="button"
-                        onClick={() => setActiveView(key as AppView)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <button
-                      className="btn btn-danger btn-hero-logout"
-                      type="button"
-                      onClick={() => void handleSignOut()}
-                    >
-                      Sair
-                    </button>
-                  </nav>
-                )}
-              </div>
-              <h1 className="headline-compact">
-                <span>Pacientes, sessoes e agenda</span>
-                <span>em um fluxo unico.</span>
-              </h1>
-            </div>
-          </div>
+    <main className="page-shell psico-shell">
+      <div className="app-frame psico-frame">
+        <header className="header">
+          <div className="logo"><span aria-hidden="true">+</span> PsicoApp</div>
+          {initialLoadState === "ready" && (
+            <nav className="header-btns" aria-label="Navegacao principal">
+              {[
+                ["painel", "Painel"],
+                ["calendario", "Agenda"],
+                ["sessoes", "Sessoes"],
+                ["pacientes", "Pacientes"],
+              ].map(([key, label]) => (
+                <button
+                  className={`hbtn ${activeView === key ? "on" : ""}`}
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveView(key as AppView)}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                className="hbtn hbtn-danger"
+                type="button"
+                onClick={() => void handleSignOut()}
+              >
+                Sair
+              </button>
+            </nav>
+          )}
         </header>
 
         {flash && <div className={`flash ${flash.type}`}>{flash.text}</div>}
@@ -1249,6 +1235,7 @@ export function PsicoApp() {
               entries={entries}
               initialSnapshot={dashboardSnapshot}
               onEditPatient={requestPatientEdition}
+              onNewSession={requestNewSession}
               onLoadSnapshot={loadDashboardSnapshot}
               onUpdateFinancialEntry={handleUpdateEntryFinancial}
               onUpdatePatientObservation={handleUpdatePatientObservation}

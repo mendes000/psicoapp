@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { Fraunces, Manrope } from "next/font/google";
+import { Lora, Nunito } from "next/font/google";
 
 import "./globals.css";
 import "./branding.css";
 
-const bodyFont = Manrope({
+const bodyFont = Nunito({
   subsets: ["latin"],
   variable: "--font-body",
 });
 
-const displayFont = Fraunces({
+const displayFont = Lora({
   subsets: ["latin"],
   variable: "--font-display",
+  weight: ["400", "600"],
 });
 
 export const metadata: Metadata = {

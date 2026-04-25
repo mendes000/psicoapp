@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import type { DashboardSnapshot, Entry } from "../lib/types";
 import {
@@ -17,6 +17,7 @@ interface DashboardViewProps {
   entries: Entry[];
   initialSnapshot: DashboardSnapshot | null;
   onEditPatient: (patientKey: string) => void;
+  onNewSession: () => void;
   onLoadSnapshot: (options?: {
     search?: string;
     reviewOnly?: boolean;
@@ -50,342 +51,188 @@ const EMPTY_SNAPSHOT: DashboardSnapshot = {
   items: [],
 };
 
+type PatientTab = "financas" | "faltas" | "prontuario" | "ficha";
+type SessionStatus = "paid" | "unpaid" | "missed" | "rescheduled";
+
 export function DashboardView({
   entries,
   initialSnapshot,
   onEditPatient,
   onLoadSnapshot,
+  onNewSession,
   onUpdateFinancialEntry,
   onUpdatePatientObservation,
 }: DashboardViewProps) {
-  const [reviewOnly, setReviewOnly] = useState(false);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(initialSnapshot);
-  const [allItemsSnapshot, setAllItemsSnapshot] = useState<DashboardSnapshot | null>(null);
-  const [openPatientKey, setOpenPatientKey] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [reviewOnly, setReviewOnly] = useState(false);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [activeTab, setActiveTab] = useState<PatientTab>("financas");
   const [loading, setLoading] = useState(false);
-  const [optionsLoading, setOptionsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [selectedNames, setSelectedNames] = useState<string[]>([]);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [optionSearch, setOptionSearch] = useState("");
-  const deferredOptionSearch = useDeferredValue(optionSearch);
-  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const deferredSearch = useDeferredValue(search);
   const activeSnapshot = snapshot ?? initialSnapshot ?? EMPTY_SNAPSHOT;
 
   useEffect(() => {
-    setAllItemsSnapshot(null);
-  }, [initialSnapshot]);
-
-  useEffect(() => {
-    if (!reviewOnly) {
+    if (!reviewOnly && !deferredSearch.trim()) {
       setSnapshot(initialSnapshot);
       setLoadError("");
       return;
     }
 
     let cancelled = false;
-
     setLoading(true);
     setLoadError("");
 
     void onLoadSnapshot({
+      search: deferredSearch,
       reviewOnly,
       itemLimit: 5000,
     })
       .then((nextSnapshot) => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setSnapshot(nextSnapshot);
         }
-
-        setSnapshot(nextSnapshot);
       })
       .catch((error) => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error ? error.message : "Falha ao atualizar o painel.",
+          );
         }
-
-        setLoadError(
-          error instanceof Error ? error.message : "Falha ao atualizar o painel.",
-        );
       })
       .finally(() => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setLoading(false);
         }
-
-        setLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [initialSnapshot, onLoadSnapshot, reviewOnly]);
+  }, [deferredSearch, initialSnapshot, onLoadSnapshot, reviewOnly]);
+
+  const visiblePatients = activeSnapshot.items;
+  const selectedPatient = useMemo(() => {
+    if (visiblePatients.length === 0) {
+      return null;
+    }
+
+    return (
+      visiblePatients.find((patient) => patient.key === selectedKey) ??
+      visiblePatients[0]
+    );
+  }, [selectedKey, visiblePatients]);
 
   useEffect(() => {
-    if (!dropdownOpen) {
+    if (!selectedPatient) {
+      setSelectedKey("");
       return;
     }
 
-    function handlePointerDown(event: MouseEvent) {
-      if (!dropdownRef.current?.contains(event.target as Node)) {
-        setDropdownOpen(false);
-      }
+    if (selectedKey !== selectedPatient.key) {
+      setSelectedKey(selectedPatient.key);
     }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [dropdownOpen]);
-
-  const patientOptions = useMemo(() => {
-    const source = allItemsSnapshot?.items ?? activeSnapshot.items;
-
-    return Array.from(
-      new Set(
-        source
-          .map((patient) => String(patient.nome ?? "").trim())
-          .filter(Boolean),
-      ),
-    ).sort((left, right) => left.localeCompare(right, "pt-BR"));
-  }, [activeSnapshot.items, allItemsSnapshot?.items]);
-
-  const filteredOptions = useMemo(() => {
-    const search = normalizeText(deferredOptionSearch);
-    const selectedSet = new Set(selectedNames);
-    const selectedOptions = patientOptions.filter((name) => selectedSet.has(name));
-
-    if (!search) {
-      return [
-        ...selectedOptions,
-        ...patientOptions.filter((name) => !selectedSet.has(name)),
-      ];
-    }
-
-    const matchingOptions = patientOptions.filter(
-      (name) => !selectedSet.has(name) && normalizeText(name).includes(search),
-    );
-
-    return [...selectedOptions, ...matchingOptions];
-  }, [deferredOptionSearch, patientOptions, selectedNames]);
-
-  const visible = useMemo(() => {
-    if (selectedNames.length === 0) {
-      return activeSnapshot.items;
-    }
-
-    const source = reviewOnly
-      ? activeSnapshot.items
-      : allItemsSnapshot?.items ?? activeSnapshot.items;
-    const selectedSet = new Set(selectedNames);
-
-    return source.filter((patient) => selectedSet.has(patient.nome));
-  }, [activeSnapshot.items, allItemsSnapshot?.items, reviewOnly, selectedNames]);
-
-  useEffect(() => {
-    if (!openPatientKey) {
-      return;
-    }
-
-    const stillVisible = visible.some((patient) => patient.key === openPatientKey);
-    if (!stillVisible) {
-      setOpenPatientKey(null);
-    }
-  }, [openPatientKey, visible]);
-
-  async function ensureAllItemsLoaded() {
-    if (allItemsSnapshot || optionsLoading) {
-      return;
-    }
-
-    setOptionsLoading(true);
-    try {
-      const nextSnapshot = await onLoadSnapshot({ itemLimit: 5000 });
-      setAllItemsSnapshot(nextSnapshot);
-    } catch (error) {
-      setLoadError(
-        error instanceof Error ? error.message : "Falha ao carregar a lista de pacientes.",
-      );
-    } finally {
-      setOptionsLoading(false);
-    }
-  }
-
-  function toggleSelection(name: string) {
-    setSelectedNames((current) =>
-      current.includes(name)
-        ? current.filter((value) => value !== name)
-        : [...current, name],
-    );
-  }
-
-  function triggerLabel() {
-    if (selectedNames.length === 0) {
-      return "Selecionar pacientes";
-    }
-
-    if (selectedNames.length <= 2) {
-      return selectedNames.join(", ");
-    }
-
-    return `${selectedNames.length} pacientes selecionados`;
-  }
+  }, [selectedKey, selectedPatient]);
 
   return (
-    <section className="layout-grid reveal">
-      {activeSnapshot.reviewCount > 0 && (
-        <div className="dashboard-hero-review-slot">
-          <div className="review-hint review-hint-hero">
-            <span className="review-hint-text">
-              {activeSnapshot.reviewCount} vinculacao{activeSnapshot.reviewCount > 1 ? "es" : ""} para revisar
-            </span>
+    <section className="app clinical-dashboard reveal">
+      <aside className="lista">
+        <div className="lista-header">
+          <div className="lista-title-row">
+            <h2>Meus Pacientes</h2>
+            <span>{activeSnapshot.totalCount || visiblePatients.length}</span>
+          </div>
+          <input
+            className="busca"
+            placeholder="Buscar paciente..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          {activeSnapshot.reviewCount > 0 && (
             <button
-              className="review-hint-action"
+              className={`review-toggle ${reviewOnly ? "on" : ""}`}
               type="button"
               onClick={() => setReviewOnly((current) => !current)}
             >
-              {reviewOnly ? "mostrar tudo" : "ver pendencias"}
+              {reviewOnly ? "Mostrando pendencias" : `${activeSnapshot.reviewCount} para revisar`}
             </button>
-          </div>
-        </div>
-      )}
-
-      <div className="panel">
-        <div className="panel-title">
-          <div className="panel-title-main panel-title-main-inline">
-            <h2 className="panel-heading">Painel</h2>
-            <div className="search-row panel-search-row">
-              <div className="field panel-search-field" ref={dropdownRef}>
-                <div className="multi-select">
-                  <button
-                    aria-expanded={dropdownOpen}
-                    className="multi-select-trigger"
-                    type="button"
-                    onClick={() => {
-                      const nextOpen = !dropdownOpen;
-                      setDropdownOpen(nextOpen);
-                      if (nextOpen) {
-                        void ensureAllItemsLoaded();
-                      }
-                    }}
-                  >
-                    <span className="multi-select-summary">{triggerLabel()}</span>
-                    <span className="multi-select-caret">{dropdownOpen ? "^" : "v"}</span>
-                  </button>
-
-                  {dropdownOpen && (
-                    <div className="multi-select-menu">
-                      <div className="input-shell multi-select-search-shell">
-                        <input
-                          autoFocus
-                          placeholder="Buscar nome..."
-                          value={optionSearch}
-                          onChange={(event) => setOptionSearch(event.target.value)}
-                        />
-                      </div>
-
-                      {selectedNames.length > 0 && (
-                        <div className="multi-select-actions">
-                          <button
-                            className="review-hint-action"
-                            type="button"
-                            onClick={() => setSelectedNames([])}
-                          >
-                            Limpar selecao
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="multi-select-list">
-                        {optionsLoading ? (
-                          <div className="empty-state multi-select-empty">
-                            Carregando pacientes...
-                          </div>
-                        ) : filteredOptions.length === 0 ? (
-                          <div className="empty-state multi-select-empty">
-                            Nenhum paciente encontrado.
-                          </div>
-                        ) : (
-                          filteredOptions.map((name) => (
-                            <label className="multi-select-option" key={name}>
-                              <input
-                                checked={selectedNames.includes(name)}
-                                type="checkbox"
-                                onChange={() => toggleSelection(name)}
-                              />
-                              <span>{name}</span>
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="panel-meta panel-meta-dashboard">
-            {reviewOnly && <span className="pill">Filtro de revisao ativo</span>}
-            {(loading || optionsLoading) && <span className="pill">Atualizando painel...</span>}
-          </div>
+          )}
         </div>
 
-        {loadError && (
-          <div className="flash info">
-            Atualizacao parcial no painel. {loadError}
-          </div>
-        )}
-
-        {visible.length === 0 ? (
-          <div className="empty-state">
-            {reviewOnly
-              ? "Nenhuma pendencia encontrada para os pacientes selecionados."
-              : selectedNames.length > 0
-                ? "Nenhum paciente encontrado para a selecao informada."
-                : "Nenhum paciente encontrado."}
-          </div>
-        ) : (
-          <div className="stack-list">
-            {visible.map((patient, index) => (
-              <details
-                className="stack-card reveal"
+        <div className="lista-scroll">
+          {loading && <div className="sidebar-note">Atualizando...</div>}
+          {loadError && <div className="sidebar-note danger">{loadError}</div>}
+          {visiblePatients.length === 0 ? (
+            <div className="sidebar-note">Nenhum paciente encontrado.</div>
+          ) : (
+            visiblePatients.map((patient) => (
+              <button
+                className={`pac-card ${selectedPatient?.key === patient.key ? "ativo" : ""}`}
                 key={patient.key}
-                open={openPatientKey === patient.key}
-                style={{ animationDelay: `${Math.min(index * 40, 240)}ms` }}
-                onToggle={(event) => {
-                  const isOpen = event.currentTarget.open;
-                  setOpenPatientKey((current) =>
-                    isOpen
-                      ? patient.key
-                      : current === patient.key
-                        ? null
-                        : current,
-                  );
+                type="button"
+                onClick={() => {
+                  setSelectedKey(patient.key);
+                  setActiveTab("financas");
                 }}
               >
-                <PatientRecord
-                  entries={entries}
-                  onEditPatient={onEditPatient}
-                  onUpdateFinancialEntry={onUpdateFinancialEntry}
-                  onUpdatePatientObservation={onUpdatePatientObservation}
-                  patient={patient}
-                />
-              </details>
-            ))}
+                <span className={`avatar ${patient.saldo < 0 ? "verm" : "verde"}`}>
+                  {initials(patient.nome)}
+                </span>
+                <span className="pac-info">
+                  <span className="pac-nome">{patient.nome || "(Sem nome)"}</span>
+                  <span className="pac-sub">{patientSubtitle(patient)}</span>
+                </span>
+                <span className={`tag ${patient.saldo < 0 ? "tag-v" : "tag-ok"}`}>
+                  {patient.saldo < 0 ? "Devendo" : "Em dia"}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+        <button className="btn-nova" type="button" onClick={onNewSession}>
+          + Nova Sessao Rapida
+        </button>
+      </aside>
+
+      <div className="painel">
+        {!selectedPatient ? (
+          <div className="vazio">
+            <div className="emoji">+</div>
+            <p>Selecione um paciente para abrir o painel.</p>
           </div>
+        ) : (
+          <PatientPanel
+            activeTab={activeTab}
+            entries={entries}
+            onEditPatient={onEditPatient}
+            onNewSession={onNewSession}
+            onTabChange={setActiveTab}
+            onUpdateFinancialEntry={onUpdateFinancialEntry}
+            onUpdatePatientObservation={onUpdatePatientObservation}
+            patient={selectedPatient}
+          />
         )}
       </div>
     </section>
   );
 }
 
-function PatientRecord({
+function PatientPanel({
+  activeTab,
   entries,
   onEditPatient,
+  onNewSession,
+  onTabChange,
   onUpdateFinancialEntry,
   onUpdatePatientObservation,
   patient,
 }: {
+  activeTab: PatientTab;
   entries: Entry[];
   onEditPatient: (patientKey: string) => void;
+  onNewSession: () => void;
+  onTabChange: (tab: PatientTab) => void;
   onUpdateFinancialEntry: (args: {
     entryId: Entry["id"];
     valorPago: number;
@@ -401,294 +248,459 @@ function PatientRecord({
   }) => Promise<void>;
   patient: DashboardSnapshot["items"][number];
 }) {
-  const [activeTab, setActiveTab] = useState<"ficha" | "prontuario" | "financas">("ficha");
-  const [showAllSessions, setShowAllSessions] = useState(false);
-  const patientEntries = useMemo(() => {
-    const patientKey = normalizeText(patient.nome);
-    const source = entries.filter((entry) => normalizeText(String(entry.nome ?? "")) === patientKey);
-    const items = source.length > 0 ? source : patient.ultimasSessoes;
+  const patientEntries = usePatientEntries(entries, patient);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [toast, setToast] = useState("");
+  const unpaidEntries = patientEntries.filter(
+    (entry) => toNumber(entry.valor_sessao) > toNumber(entry.valor_pago),
+  );
+  const paidEntries = patientEntries.filter(
+    (entry) => toNumber(entry.valor_pago) > 0,
+  );
+  const missedEntries = patientEntries.filter((entry) => sessionStatus(entry) === "missed");
+  const rescheduledEntries = patientEntries.filter(
+    (entry) => sessionStatus(entry) === "rescheduled",
+  );
+  const attentionEntries = patientEntries.filter((entry) => {
+    const status = sessionStatus(entry);
+    return status === "unpaid" || status === "missed" || status === "rescheduled";
+  });
+  const openAmount = Math.max(0, -patient.saldo);
+  const suggestedPayment = unpaidEntries.reduce(
+    (sum, entry) => sum + Math.max(0, toNumber(entry.valor_sessao) - toNumber(entry.valor_pago)),
+    0,
+  );
+  const sessionValue = sessionPrice(patientEntries);
 
-    return [...items].sort((left, right) => {
-      const leftTime = parseFlexibleDate(left.data)?.getTime() ?? 0;
-      const rightTime = parseFlexibleDate(right.data)?.getTime() ?? 0;
-      return rightTime - leftTime;
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setToast(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  function handleExport(kind: "prontuario" | "financeiro" | "ficha" | "tudo") {
+    const labels = {
+      prontuario: "Prontuario completo",
+      financeiro: "Relatorio financeiro",
+      ficha: "Ficha do paciente",
+      tudo: "Arquivo completo",
+    };
+
+    downloadTextFile({
+      content: buildExportText(kind, patient, patientEntries),
+      filename: `${safeFilename(patient.nome || "paciente")}-${kind}.txt`,
     });
-  }, [entries, patient]);
+    setExportOpen(false);
+    setToast(`Exportado: ${labels[kind]} - ${patient.nome}`);
+  }
 
   return (
     <>
-      <summary>
-        <div className="stack-summary stack-summary-with-tabs">
-          <div className="patient-summary-main">
-            <div className="patient-summary-heading">
-              <strong>{patient.nome || "(Sem nome)"}</strong>
-              {patient.ultimaSessaoData && (
-                <span className="patient-summary-last-session">
-                  Ultima sessao em {formatDateTimeBr(patient.ultimaSessaoData)}
-                </span>
-              )}
-            </div>
-            <div className="session-meta">
-              {patient.reviewState === "duplicate-name" && (
-                <span>Homonimo em {patient.duplicateNameCount} cadastros</span>
-              )}
-              {patient.reviewState === "entry-only" && (
-                <span>Historico sem vinculo automatico</span>
-              )}
-              {patient.tratamento && <span>{patient.tratamento}</span>}
-            </div>
+      <div className="pac-header" data-session-value={sessionValue}>
+        <div className="pac-header-top">
+          <div className="pac-header-nome">
+            <h1>{patient.nome || "(Sem nome)"}</h1>
+            <p>
+              {patient.cpf ? `CPF ${patient.cpf} · ` : ""}
+              {patient.tratamento || "Terapia Individual"}
+              {sessionPrice(patientEntries) > 0
+                ? ` · ${formatCurrency(sessionPrice(patientEntries))} / sessao`
+                : ""}
+            </p>
           </div>
-
-          <div
-            className="record-tabs"
-            role="tablist"
-            aria-label={`Abas de ${patient.nome}`}
-            onClick={(event) => event.preventDefault()}
-          >
-            <button
-              className={`record-tab ${activeTab === "ficha" ? "active" : ""}`}
-              type="button"
-              onClick={() => setActiveTab("ficha")}
-            >
-              Ficha
+          <div className="header-acoes">
+            <button className="btn-sessao-rapida btn-sess" type="button" onClick={onNewSession}>
+              + Registrar sessao
             </button>
-            <button
-              className={`record-tab ${activeTab === "prontuario" ? "active" : ""}`}
-              type="button"
-              onClick={() => setActiveTab("prontuario")}
-            >
-              Prontuario
-            </button>
-            <button
-              className={`record-tab ${activeTab === "financas" ? "active" : ""}`}
-              type="button"
-              onClick={() => setActiveTab("financas")}
-            >
-              Financas
-            </button>
+            <div className="export-wrap">
+              <button
+                aria-expanded={exportOpen}
+                className="btn-export"
+                type="button"
+                onClick={() => setExportOpen((current) => !current)}
+              >
+                Exportar v
+              </button>
+              <div className={`export-menu ${exportOpen ? "on" : ""}`}>
+                <button className="exp-item" type="button" onClick={() => handleExport("prontuario")}>
+                  <span className="exp-icon ei-pront">P</span>
+                  <span>
+                    <strong>Prontuario completo</strong>
+                    <small>Todas as anotacoes · PDF</small>
+                  </span>
+                </button>
+                <div className="exp-sep" />
+                <button className="exp-item" type="button" onClick={() => handleExport("financeiro")}>
+                  <span className="exp-icon ei-fin">R$</span>
+                  <span>
+                    <strong>Relatorio financeiro</strong>
+                    <small>Sessoes e pagamentos · PDF</small>
+                  </span>
+                </button>
+                <div className="exp-sep" />
+                <button className="exp-item" type="button" onClick={() => handleExport("ficha")}>
+                  <span className="exp-icon ei-ficha">F</span>
+                  <span>
+                    <strong>Ficha do paciente</strong>
+                    <small>Dados cadastrais · PDF</small>
+                  </span>
+                </button>
+                <div className="exp-sep" />
+                <button className="exp-item" type="button" onClick={() => handleExport("tudo")}>
+                  <span className="exp-icon ei-all">T</span>
+                  <span>
+                    <strong>Exportar tudo</strong>
+                    <small>Prontuario + Ficha + Financas</small>
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </summary>
+        <div className="abas">
+          <button
+            className={`aba ${activeTab === "financas" ? "on" : ""}`}
+            type="button"
+            onClick={() => onTabChange("financas")}
+          >
+            Financeiro
+          </button>
+          <button
+            className={`aba ${activeTab === "faltas" ? "on" : ""}`}
+            type="button"
+            onClick={() => onTabChange("faltas")}
+          >
+            Faltas
+          </button>
+          <button
+            className={`aba ${activeTab === "prontuario" ? "on" : ""}`}
+            type="button"
+            onClick={() => onTabChange("prontuario")}
+          >
+            Prontuario
+          </button>
+          <button
+            className={`aba ${activeTab === "ficha" ? "on" : ""}`}
+            type="button"
+            onClick={() => onTabChange("ficha")}
+          >
+            Ficha
+          </button>
+        </div>
+      </div>
 
-      <PatientTabsContent
-        activeTab={activeTab}
-        onEditPatient={onEditPatient}
-        onToggleShowAllSessions={() => setShowAllSessions((current) => !current)}
-        onUpdateFinancialEntry={onUpdateFinancialEntry}
-        onUpdatePatientObservation={onUpdatePatientObservation}
-        patientEntries={patientEntries}
-        patient={patient}
-        showAllSessions={showAllSessions}
-      />
+      <div className={`aba-content ${activeTab === "financas" ? "on" : ""}`}>
+        <div className="fin-cards">
+          <div className="fin-card fc-azul">
+            <div className="fc-l">Sessoes realizadas</div>
+            <div className="fc-v">{patient.totalSessoes} sessoes</div>
+          </div>
+          <div className="fin-card fc-verde">
+            <div className="fc-l">Total recebido</div>
+            <div className="fc-v">{formatCurrency(patient.totalPago)}</div>
+          </div>
+          <div className="fin-card fc-verm">
+            <div className="fc-l">Em aberto</div>
+            <div className="fc-v">{formatCurrency(openAmount)}</div>
+          </div>
+          <div className="fin-card fc-amar">
+            <div className="fc-l">Faltas total</div>
+            <div className="fc-v">{missedEntries.length} faltas</div>
+          </div>
+        </div>
+
+        <div className="sec-titulo">Sessoes nao pagas e ocorrencias</div>
+        <div className="sess-lista">
+          {attentionEntries.length === 0 ? (
+            <div className="empty-state">Nenhuma sessao em aberto, falta ou remarcacao.</div>
+          ) : (
+            attentionEntries.map((entry, index) => (
+              <FinanceSessionRow
+                entry={entry}
+                index={patientEntries.length - index}
+                key={rowKey(patient.key, entry, index)}
+                onUpdateFinancialEntry={onUpdateFinancialEntry}
+              />
+            ))
+          )}
+        </div>
+
+        {unpaidEntries.length > 0 && (
+          <div className="reg-pgto">
+            <h3>Registrar pagamento recebido</h3>
+            <div className="reg-grid">
+              <label className="campo">
+                <span>Valor recebido</span>
+                <input readOnly value={formatCurrency(suggestedPayment)} />
+              </label>
+              <label className="campo">
+                <span>Sessoes contempladas</span>
+                <input readOnly value={`${unpaidEntries.length} sessoes em aberto`} />
+              </label>
+            </div>
+            <div className="preview-sessoes">
+              <div className="ps-titulo">Marque cada sessao como paga na lista acima.</div>
+              <div className="chips">
+                {unpaidEntries.slice(0, 6).map((entry, index) => (
+                  <span className="chip" key={rowKey(patient.key, entry, index)}>
+                    {formatDateBr(entry.data)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="sec-titulo">Historico de pagamentos</div>
+        <div className="pgto-list">
+          {paidEntries.length === 0 ? (
+            <div className="empty-state">Nenhum pagamento registrado.</div>
+          ) : (
+            paidEntries.slice(0, 12).map((entry, index) => (
+              <div className="pgto-item" key={rowKey(patient.key, entry, index)}>
+                <div className="pgto-top">
+                  <div>
+                    <div className="pgto-title">{formatDateTimeBr(entry.data)}</div>
+                    <div className="pgto-data-obs">{entry.obs || entry.tipo || "Pagamento registrado"}</div>
+                  </div>
+                  <div className="pgto-valor">{formatCurrency(entry.valor_pago)}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className={`aba-content ${activeTab === "faltas" ? "on" : ""}`}>
+        <div className="faltas-bloco">
+          <h3>Controle de Faltas e Remarcacoes</h3>
+          <div className="faltas-resumo">
+            <div className="fr-card frc-amar">
+              <div className="frl">Total de faltas</div>
+              <div className="frv">{missedEntries.length}</div>
+            </div>
+            <div className="fr-card frc-roxo">
+              <div className="frl">Remarcacoes</div>
+              <div className="frv">{rescheduledEntries.length}</div>
+            </div>
+            <div className="fr-card frc-verm">
+              <div className="frl">Sem aviso previo</div>
+              <div className="frv">{noNoticeCount(missedEntries)}</div>
+            </div>
+          </div>
+
+          <div className="faltas-reg-titulo">Historico</div>
+          {[...missedEntries, ...rescheduledEntries].length === 0 ? (
+            <div className="empty-state">Nenhuma falta ou remarcacao registrada.</div>
+          ) : (
+            [...missedEntries, ...rescheduledEntries]
+              .sort((left, right) => {
+                const leftTime = parseFlexibleDate(left.data)?.getTime() ?? 0;
+                const rightTime = parseFlexibleDate(right.data)?.getTime() ?? 0;
+                return rightTime - leftTime;
+              })
+              .map((entry, index) => (
+                <AbsenceItem
+                  entry={entry}
+                  key={rowKey(patient.key, entry, index)}
+                />
+              ))
+          )}
+
+          <div className="reg-falta">
+            <div className="reg-falta-titulo">+ Registrar nova falta ou remarcacao</div>
+            <div className="reg-falta-grid">
+              <label className="campo">
+                <span>Paciente</span>
+                <input readOnly value={patient.nome || "(Sem nome)"} />
+              </label>
+              <label className="campo">
+                <span>Registro</span>
+                <select defaultValue="Falta - sem aviso">
+                  <option>Falta - sem aviso</option>
+                  <option>Falta - avisou mesmo dia</option>
+                  <option>Remarcacao (&gt;24h)</option>
+                  <option>Remarcacao (&lt;24h)</option>
+                </select>
+              </label>
+              <button className="btn-reg-falta" type="button" onClick={onNewSession}>
+                Registrar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className={`aba-content ${activeTab === "prontuario" ? "on" : ""}`}>
+        <EditableProntuarioObservation
+          onUpdatePatientObservation={onUpdatePatientObservation}
+          patient={patient}
+        />
+        <div className="pront-lista">
+          {patientEntries.length === 0 ? (
+            <div className="empty-state">Nenhuma anotacao encontrada para este paciente.</div>
+          ) : (
+            patientEntries.slice(0, 20).map((entry, index) => (
+              <ProntuarioItem
+                entry={entry}
+                initiallyOpen={index === 0}
+                index={patientEntries.length - index}
+                key={rowKey(patient.key, entry, index)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className={`aba-content ${activeTab === "ficha" ? "on" : ""}`}>
+        {patient.reviewState !== "ok" && (
+          <div className="notice-card inline-notice">
+            <strong>Revisao manual necessaria</strong>
+            <p>{patient.reviewNote}</p>
+          </div>
+        )}
+        <div className="ficha-actions">
+          {patient.hasPatientRecord && (
+            <button
+              className="section-action-btn"
+              type="button"
+              onClick={() => onEditPatient(patient.patientKey)}
+            >
+              Editar ficha
+            </button>
+          )}
+        </div>
+        <div className="ficha-grid">
+          {fichaItems(patient).map(([label, value, wide]) => (
+            <div className={`ficha-campo ${wide ? "full" : ""}`} key={label}>
+              <div className="fc-label">{label}</div>
+              <div className="fc-val">{value || "(nao informado)"}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {toast && <div className="toast on">{toast}</div>}
     </>
   );
 }
 
-function PatientTabsContent({
-  activeTab,
-  onEditPatient,
-  onToggleShowAllSessions,
+function FinanceSessionRow({
+  entry,
+  index,
   onUpdateFinancialEntry,
-  onUpdatePatientObservation,
-  patientEntries,
-  patient,
-  showAllSessions,
 }: {
-  activeTab: "ficha" | "prontuario" | "financas";
-  onEditPatient: (patientKey: string) => void;
-  onToggleShowAllSessions: () => void;
+  entry: Entry;
+  index: number;
   onUpdateFinancialEntry: (args: {
     entryId: Entry["id"];
     valorPago: number;
     obs: string;
   }) => Promise<void>;
-  onUpdatePatientObservation: (args: {
-    patientKey: string;
-    nome: string;
-    cpf: string;
-    email: string;
-    telefone: string;
-    observacoes: string;
-  }) => Promise<void>;
-  patientEntries: Entry[];
-  patient: DashboardSnapshot["items"][number];
-  showAllSessions: boolean;
 }) {
-  const hasMoreProntuarioSessions = patientEntries.length > patient.ultimasSessoes.length;
-  const hasMoreFinanceSessions = patientEntries.length > 10;
-  const prontuarioEntries = showAllSessions ? patientEntries : patient.ultimasSessoes;
-  const financeEntries = showAllSessions ? patientEntries : patientEntries.slice(0, 10);
-  const personalItems: Array<[label: string, value: string]> = [
-    ["Nascimento", formatDateBr(patient.nascimento)],
-    ["Idade", calculateAge(patient.nascimento)],
-    ["CPF", patient.cpf],
-    ["Profissao", patient.profissao],
-    ["Origem", patient.origem],
-    ["Quem indicou", patient.quemIndicou],
-  ];
-  const contactItems: Array<[label: string, value: string]> = [
-    ["Telefone", patient.telefone],
-    ["Email", patient.email],
-    ["Contato emergencia", patient.contatoEmergencia],
-    ["Nome contato", patient.nomeContato],
-    ["Endereco", patient.endereco],
-    ["Bairro", patient.bairro],
-    ["Cidade", patient.cidade],
-    ["CEP", patient.cep],
-  ];
-  const familyItems: Array<[label: string, value: string]> = [
-    ["Nome do pai", patient.nomePai],
-    ["Nome da mae", patient.nomeMae],
-    ["Observacoes", patient.observacoes],
-  ];
+  const [saving, setSaving] = useState(false);
+  const canEdit = entry.id !== null && entry.id !== undefined && entry.id !== "";
+  const status = sessionStatus(entry);
+  const isUnpaid = status === "unpaid";
+
+  async function markPaid() {
+    if (!canEdit || saving || !isUnpaid) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onUpdateFinancialEntry({
+        entryId: entry.id,
+        valorPago: toNumber(entry.valor_sessao),
+        obs: String(entry.obs ?? "").trim(),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <div className="stack-body">
-      {activeTab === "ficha" && (
-        <>
-          {patient.reviewState !== "ok" && (
-            <div className="notice-card inline-notice">
-              <strong>Revisao manual necessaria</strong>
-              <p>{patient.reviewNote}</p>
-            </div>
-          )}
-
-          {patient.hasPatientRecord && (
-            <>
-              <section className="layout-grid">
-                <div className="section-heading-row">
-                  <h3 className="section-heading">Ficha do paciente</h3>
-                  <button
-                    className="section-action-btn"
-                    type="button"
-                    onClick={() => onEditPatient(patient.patientKey)}
-                  >
-                    Editar
-                  </button>
-                </div>
-
-                <CompactDetailList items={personalItems} />
-              </section>
-
-              <CompactDetailSection
-                items={contactItems}
-                title="Contato e endereco"
-              />
-
-              <CompactDetailSection
-                items={familyItems}
-                title="Familia e observacoes"
-              />
-            </>
-          )}
-        </>
-      )}
-
-      {activeTab === "prontuario" && (
-        <>
-          {patient.hasPatientRecord && (
-            <EditableProntuarioObservation
-              onUpdatePatientObservation={onUpdatePatientObservation}
-              patient={patient}
-            />
-          )}
-          <section className="layout-grid">
-            <div className="section-heading-row">
-              <h3 className="section-heading">
-                {patient.hasPatientRecord ? "Ultimas sessoes" : "Historico encontrado"}
-              </h3>
-              {hasMoreProntuarioSessions && (
-                <button
-                  className="section-action-btn"
-                  type="button"
-                  onClick={onToggleShowAllSessions}
-                >
-                  {showAllSessions ? "Mostrar ultimas sessoes" : "Mostrar todas as sessoes"}
-                </button>
-              )}
-            </div>
-            {prontuarioEntries.length === 0 ? (
-              <div className="empty-state">
-                {patient.hasPatientRecord
-                  ? "Nenhuma sessao encontrada para este paciente."
-                  : "Nenhuma sessao encontrada para este historico."}
-              </div>
-            ) : (
-              <div className="compact-entry-stack">
-                {prontuarioEntries.map((entry, index) => (
-                  <article
-                    className="compact-inline-row"
-                    key={[
-                      patient.key,
-                      entry.id ?? "sem-id",
-                      entry.data ?? "sem-data",
-                      index,
-                    ].join("-")}
-                  >
-                    <strong className="compact-inline-date">
-                      {formatDateTimeBr(entry.data)}
-                    </strong>
-                    {String(entry.anotacoes_clinicas ?? "").trim() ? (
-                      <span className="compact-inline-value">
-                        {String(entry.anotacoes_clinicas ?? "").trim()}
-                      </span>
-                    ) : (
-                      <span className="compact-inline-placeholder">
-                        (campo nao preenchido)
-                      </span>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        </>
-      )}
-      {activeTab === "financas" && (
-        <section className="layout-grid">
-          <div className="section-heading-row">
-            <h3 className="section-heading">Sessoes</h3>
-            {hasMoreFinanceSessions && (
-              <button
-                className="section-action-btn"
-                type="button"
-                onClick={onToggleShowAllSessions}
-              >
-                {showAllSessions ? "Mostrar ultimas sessoes" : "Mostrar todas as sessoes"}
-              </button>
-            )}
-          </div>
-          {financeEntries.length === 0 ? (
-            <div className="empty-state">Nenhuma sessao encontrada para este paciente.</div>
-          ) : (
-            <div className="compact-finance-table">
-              <div className="compact-finance-head">
-                <div className="compact-finance-meta-head">
-                  <span>Data</span>
-                  <span>Valor da sessao</span>
-                  <span>Pagamento</span>
-                </div>
-                <span>Observacoes</span>
-              </div>
-              {financeEntries.map((entry, index) => {
-                return (
-                  <EditableFinanceRow
-                    entry={entry}
-                    key={[
-                      patient.key,
-                      entry.id ?? "sem-id",
-                      entry.data ?? "sem-data",
-                      index,
-                    ].join("-")}
-                    onUpdateFinancialEntry={onUpdateFinancialEntry}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </section>
-      )}
+    <div className={`sess-row ${sessionRowClass(status)}`}>
+      <div className={`num-ball ${sessionBallClass(status)}`}>
+        {status === "missed" ? "x" : status === "rescheduled" ? "r" : index}
+      </div>
+      <div>
+        <div className="sess-data">{formatDateBr(entry.data)}</div>
+        <div className="sess-label">{entry.tipo || "Sessao"}</div>
+        {entry.obs && <div className="sess-obs">{entry.obs}</div>}
+      </div>
+      <div className="ml-auto sess-actions">
+        <span className={`status-pill ${sessionPillClass(status)}`}>
+          {sessionStatusLabel(status)}
+        </span>
+        {isUnpaid && (
+          <button
+            className="mini-action"
+            disabled={!canEdit || saving}
+            type="button"
+            onClick={() => void markPaid()}
+          >
+            {saving ? "Salvando..." : "Quitar"}
+          </button>
+        )}
+      </div>
     </div>
+  );
+}
+
+function AbsenceItem({ entry }: { entry: Entry }) {
+  const status = sessionStatus(entry);
+  const missed = status === "missed";
+
+  return (
+    <div className={`falta-item ${missed ? "ft-falta" : "ft-remarc"}`}>
+      <div className={`fi-icon ${missed ? "fi-a" : "fi-r"}`}>
+        {missed ? "!" : "r"}
+      </div>
+      <div className="fi-info">
+        <div className="fi-data">{formatDateBr(entry.data)}</div>
+        <div className="fi-label">{entry.tipo || sessionStatusLabel(status)}</div>
+        <div className="fi-obs">{entry.obs || (missed ? "Falta registrada" : "Remarcacao registrada")}</div>
+      </div>
+      <span className={`status-pill ${sessionPillClass(status)}`}>
+        {sessionStatusLabel(status)}
+      </span>
+    </div>
+  );
+}
+
+function ProntuarioItem({
+  entry,
+  index,
+  initiallyOpen,
+}: {
+  entry: Entry;
+  index: number;
+  initiallyOpen: boolean;
+}) {
+  const [open, setOpen] = useState(initiallyOpen);
+  const note = String(entry.anotacoes_clinicas ?? "").trim();
+
+  return (
+    <article className="pront-item">
+      <button
+        className={`pront-top ${open ? "aberto" : ""}`}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <div>
+          <div className="pront-dt">{formatDateTimeBr(entry.data)} · {index}a sessao</div>
+          <div className="pront-resumo">{note || "(evolucao clinica nao preenchida)"}</div>
+        </div>
+        <span className={`pront-seta ${open ? "aberto" : ""}`}>v</span>
+      </button>
+      <div className={`pront-corpo ${open ? "on" : ""}`}>
+        {note || "(evolucao clinica nao preenchida)"}
+      </div>
+    </article>
   );
 }
 
@@ -707,16 +719,9 @@ function EditableProntuarioObservation({
   patient: DashboardSnapshot["items"][number];
 }) {
   const currentValue = String(patient.observacoes ?? "").trim();
-  const canEdit =
-    patient.hasPatientRecord &&
-    Boolean(
-      patient.cpf ||
-        patient.email ||
-        patient.telefone ||
-        patient.reviewState !== "duplicate-name",
-    );
   const [draft, setDraft] = useState(currentValue);
   const [saving, setSaving] = useState(false);
+  const canEdit = patient.hasPatientRecord && patient.patientKey !== "";
 
   useEffect(() => {
     setDraft(currentValue);
@@ -724,16 +729,11 @@ function EditableProntuarioObservation({
 
   async function handleBlur() {
     const nextValue = draft.trim();
-
     if (!canEdit || saving || currentValue === nextValue) {
-      if (currentValue !== draft) {
-        setDraft(currentValue);
-      }
       return;
     }
 
     setSaving(true);
-
     try {
       await onUpdatePatientObservation({
         patientKey: patient.patientKey,
@@ -751,204 +751,225 @@ function EditableProntuarioObservation({
   }
 
   return (
-    <section className="layout-grid">
-      <div className="section-heading-row">
-        <h3 className="section-heading">Observacoes</h3>
-        <span className="compact-editor-status">
-          {saving
-            ? "Salvando..."
-            : canEdit
-              ? "Salva ao sair do campo"
-              : "Edicao indisponivel para homonimos sem identificador"}
-        </span>
-      </div>
-      <div className="prontuario-observation-shell">
+    <div className="pront-add pront-editor">
+      <label>
+        <span>{saving ? "Salvando..." : "Observacoes gerais do prontuario"}</span>
         <textarea
-          className="prontuario-observation-editor"
           disabled={!canEdit || saving}
-          placeholder={
-            canEdit
-              ? "Registrar observacoes do prontuario..."
-              : "Adicione um identificador ao cadastro para liberar esta edicao."
-          }
+          placeholder="Registrar observacoes do prontuario..."
           value={draft}
           onBlur={() => void handleBlur()}
           onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.currentTarget.blur();
-            }
-          }}
         />
-      </div>
-    </section>
-  );
-}
-
-function CompactDetailList({
-  fallbackItem,
-  items,
-}: {
-  fallbackItem?: [label: string, value: string];
-  items: Array<[label: string, value: string]>;
-}) {
-  const filledItems = items.filter(([, value]) => String(value ?? "").trim());
-
-  if (filledItems.length === 0) {
-    if (!fallbackItem) {
-      return null;
-    }
-
-    filledItems.push(fallbackItem);
-  }
-
-  return (
-    <div className="compact-detail-list">
-      {filledItems.map(([label, value]) => (
-        <div className="compact-detail-row" key={label}>
-          <span className="compact-detail-label">{label}</span>
-          <strong className="compact-detail-value">{value}</strong>
-        </div>
-      ))}
+      </label>
     </div>
   );
 }
 
-function CompactDetailSection({
-  items,
-  title,
-}: {
-  items: Array<[label: string, value: string]>;
-  title: string;
-}) {
-  const filledItems = items.filter(([, value]) => String(value ?? "").trim());
+function usePatientEntries(entries: Entry[], patient: DashboardSnapshot["items"][number]) {
+  return useMemo(() => {
+    const key = normalizeText(patient.nome);
+    const source = entries.filter((entry) => normalizeText(entry.nome) === key);
+    const items = source.length > 0 ? source : patient.ultimasSessoes;
 
-  if (filledItems.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="layout-grid">
-      <h3 className="section-heading">{title}</h3>
-      <CompactDetailList items={filledItems} />
-    </section>
-  );
+    return [...items].sort((left, right) => {
+      const leftTime = parseFlexibleDate(left.data)?.getTime() ?? 0;
+      const rightTime = parseFlexibleDate(right.data)?.getTime() ?? 0;
+      return rightTime - leftTime;
+    });
+  }, [entries, patient]);
 }
 
-function EditableFinanceRow({
-  entry,
-  onUpdateFinancialEntry,
-}: {
-  entry: Entry;
-  onUpdateFinancialEntry: (args: {
-    entryId: Entry["id"];
-    valorPago: number;
-    obs: string;
-  }) => Promise<void>;
-}) {
-  const entryId = entry.id;
-  const canEdit = entryId !== null && entryId !== undefined && entryId !== "";
-  const paidFromEntry = toNumber(entry.valor_pago) > 0;
-  const [isPaid, setIsPaid] = useState(paidFromEntry);
-  const [observationDraft, setObservationDraft] = useState(String(entry.obs ?? "").trim());
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setIsPaid(paidFromEntry);
-  }, [paidFromEntry]);
-
-  useEffect(() => {
-    setObservationDraft(String(entry.obs ?? "").trim());
-  }, [entry.id, entry.obs]);
-
-  async function persist(nextState?: { isPaid?: boolean; obs?: string }) {
-    if (!canEdit) {
-      return;
-    }
-
-    const nextPaid = nextState?.isPaid ?? isPaid;
-    const nextObs = nextState?.obs ?? observationDraft;
-
-    setSaving(true);
-    try {
-      await onUpdateFinancialEntry({
-        entryId,
-        valorPago: nextPaid ? toNumber(entry.valor_sessao) : 0,
-        obs: nextObs,
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleToggle() {
-    if (!canEdit || saving) {
-      return;
-    }
-
-    const nextPaid = !isPaid;
-    setIsPaid(nextPaid);
-
-    try {
-      await persist({ isPaid: nextPaid });
-    } catch {
-      setIsPaid(paidFromEntry);
-    }
-  }
-
-  async function handleObservationBlur() {
-    const currentValue = String(entry.obs ?? "").trim();
-    const nextValue = observationDraft.trim();
-
-    if (!canEdit || saving || currentValue === nextValue) {
-      if (currentValue !== observationDraft) {
-        setObservationDraft(currentValue);
-      }
-      return;
-    }
-
-    try {
-      await persist({ obs: nextValue });
-    } catch {
-      setObservationDraft(currentValue);
-    }
-  }
-
-  return (
-    <article className="compact-finance-row">
-      <div className="compact-finance-meta">
-        <strong className="compact-inline-date">{formatDateBr(entry.data)}</strong>
-        <strong className="compact-inline-value">
-          {formatCurrency(entry.valor_sessao)}
-        </strong>
-        <div className="payment-toggle finance-toggle compact-finance-payment">
-          <button
-            aria-checked={isPaid}
-            aria-label={isPaid ? "Sessao paga" : "Sessao nao paga"}
-            className={`payment-switch ${isPaid ? "active" : ""}`}
-            disabled={!canEdit || saving}
-            role="switch"
-            tabIndex={canEdit ? 0 : -1}
-            type="button"
-            onClick={() => void handleToggle()}
-          />
-        </div>
-      </div>
-      <input
-        className="compact-observation-editor"
-        disabled={!canEdit || saving}
-        placeholder="(campo nao preenchido)"
-        value={observationDraft}
-        onBlur={() => void handleObservationBlur()}
-        onChange={(event) => setObservationDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.currentTarget.blur();
-          }
-        }}
-      />
-    </article>
-  );
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return `${parts[0]?.[0] ?? "P"}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
+function patientSubtitle(patient: DashboardSnapshot["items"][number]) {
+  if (patient.saldo < 0) {
+    return `${Math.abs(patient.saldo / Math.max(sessionPrice(patient.ultimasSessoes), 1)).toFixed(0)} sessoes em aberto · ${formatCurrency(Math.abs(patient.saldo))}`;
+  }
 
+  if (patient.ultimaSessaoData) {
+    return `Ultima sessao: ${formatDateBr(patient.ultimaSessaoData)}`;
+  }
+
+  return patient.tratamento || "Sem sessoes registradas";
+}
+
+function sessionPrice(entries: Entry[]) {
+  const entry = entries.find((item) => toNumber(item.valor_sessao) > 0);
+  return toNumber(entry?.valor_sessao);
+}
+
+function sessionStatus(entry: Entry): SessionStatus {
+  const text = normalizeText([
+    entry.tipo,
+    entry.obs,
+    entry.situacao,
+    entry.status,
+  ].join(" "));
+
+  if (text.includes("remarc")) {
+    return "rescheduled";
+  }
+
+  if (text.includes("falta") || text.includes("faltou")) {
+    return "missed";
+  }
+
+  return toNumber(entry.valor_pago) > 0 ? "paid" : "unpaid";
+}
+
+function sessionRowClass(status: SessionStatus) {
+  return {
+    paid: "pago",
+    unpaid: "nao",
+    missed: "falta",
+    rescheduled: "remarc",
+  }[status];
+}
+
+function sessionBallClass(status: SessionStatus) {
+  return {
+    paid: "nb-ok",
+    unpaid: "nb-nao",
+    missed: "nb-falta",
+    rescheduled: "nb-remarc",
+  }[status];
+}
+
+function sessionPillClass(status: SessionStatus) {
+  return {
+    paid: "sp-ok",
+    unpaid: "sp-nao",
+    missed: "sp-falta",
+    rescheduled: "sp-remarc",
+  }[status];
+}
+
+function sessionStatusLabel(status: SessionStatus) {
+  return {
+    paid: "Pago",
+    unpaid: "Nao pago",
+    missed: "Faltou",
+    rescheduled: "Remarcada",
+  }[status];
+}
+
+function noNoticeCount(entries: Entry[]) {
+  return entries.filter((entry) => {
+    const text = normalizeText([entry.tipo, entry.obs, entry.situacao].join(" "));
+    return text.includes("sem aviso") || text.includes("sem previo");
+  }).length;
+}
+
+function buildExportText(
+  kind: "prontuario" | "financeiro" | "ficha" | "tudo",
+  patient: DashboardSnapshot["items"][number],
+  entries: Entry[],
+) {
+  const sections: string[] = [];
+
+  function addFicha() {
+    sections.push(
+      [
+        "FICHA DO PACIENTE",
+        `Nome: ${patient.nome}`,
+        `CPF: ${patient.cpf || "(nao informado)"}`,
+        `Telefone: ${patient.telefone || "(nao informado)"}`,
+        `Email: ${patient.email || "(nao informado)"}`,
+        `Tratamento: ${patient.tratamento || "(nao informado)"}`,
+        `Observacoes: ${patient.observacoes || "(nao informado)"}`,
+      ].join("\n"),
+    );
+  }
+
+  function addFinanceiro() {
+    sections.push(
+      [
+        "FINANCEIRO",
+        `Sessoes: ${patient.totalSessoes}`,
+        `Total recebido: ${formatCurrency(patient.totalPago)}`,
+        `Em aberto: ${formatCurrency(Math.max(0, -patient.saldo))}`,
+        "",
+        ...entries.map((entry) =>
+          [
+            formatDateTimeBr(entry.data),
+            entry.tipo || "Sessao",
+            `Valor: ${formatCurrency(entry.valor_sessao)}`,
+            `Pago: ${formatCurrency(entry.valor_pago)}`,
+            `Status: ${sessionStatusLabel(sessionStatus(entry))}`,
+            entry.obs ? `Obs: ${entry.obs}` : "",
+          ].filter(Boolean).join(" | "),
+        ),
+      ].join("\n"),
+    );
+  }
+
+  function addProntuario() {
+    sections.push(
+      [
+        "PRONTUARIO",
+        ...entries.map((entry) =>
+          [
+            formatDateTimeBr(entry.data),
+            String(entry.anotacoes_clinicas ?? "").trim() || "(evolucao clinica nao preenchida)",
+          ].join(" - "),
+        ),
+      ].join("\n"),
+    );
+  }
+
+  if (kind === "ficha" || kind === "tudo") {
+    addFicha();
+  }
+
+  if (kind === "financeiro" || kind === "tudo") {
+    addFinanceiro();
+  }
+
+  if (kind === "prontuario" || kind === "tudo") {
+    addProntuario();
+  }
+
+  return sections.join("\n\n---\n\n");
+}
+
+function downloadTextFile({ content, filename }: { content: string; filename: string }) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function safeFilename(value: string) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "paciente";
+}
+
+function rowKey(patientKey: string, entry: Entry, index: number) {
+  return [patientKey, entry.id ?? "sem-id", entry.data ?? "sem-data", index].join("-");
+}
+
+function fichaItems(patient: DashboardSnapshot["items"][number]): Array<[string, string, boolean?]> {
+  return [
+    ["Nome completo", patient.nome],
+    ["CPF", patient.cpf],
+    ["Data de nascimento", [formatDateBr(patient.nascimento), calculateAge(patient.nascimento) && `${calculateAge(patient.nascimento)} anos`].filter(Boolean).join(" · ")],
+    ["Telefone / WhatsApp", patient.telefone],
+    ["E-mail", patient.email],
+    ["Modalidade", patient.tratamento],
+    ["Profissao", patient.profissao],
+    ["Origem", patient.origem],
+    ["Quem indicou", patient.quemIndicou],
+    ["Contato de emergencia", patient.contatoEmergencia],
+    ["Endereco", [patient.endereco, patient.bairro, patient.cidade, patient.cep].filter(Boolean).join(" · "), true],
+    ["Familia", [patient.nomePai && `Pai: ${patient.nomePai}`, patient.nomeMae && `Mae: ${patient.nomeMae}`].filter(Boolean).join(" · "), true],
+    ["Observacoes gerais", patient.observacoes, true],
+  ];
+}
