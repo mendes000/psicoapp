@@ -823,6 +823,15 @@ button {
   background: rgba(20, 149, 213, 0.12);
 }
 
+.patient-section-row {
+  margin-bottom: 12px;
+}
+
+.patient-section-row .sec-titulo {
+  flex: 1;
+  margin-bottom: 0;
+}
+
 .compact-editor-status {
   color: var(--muted);
   font-size: 0.84rem;
@@ -2799,5 +2808,341 @@ body::before,
 
   .abas {
     overflow-x: auto;
+  }
+}
+
+/* Shared clinical styling for secondary pages */
+.content-shell > .two-col,
+.content-shell > .panel {
+  min-height: calc(100vh - 56px);
+  padding: 24px 28px;
+  background: var(--cinza);
+}
+
+.content-shell > .two-col {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.content-shell > .panel {
+  border: 0;
+  border-radius: 0;
+}
+
+.content-shell > .two-col > .panel,
+.content-shell > .two-col > form.panel,
+.content-shell > .two-col > div.panel,
+.content-shell > .panel > .panel,
+.content-shell > .panel {
+  background: var(--branco);
+  border: 1.5px solid var(--borda);
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.content-shell > .panel {
+  margin: 24px 28px;
+  min-height: auto;
+  padding: 20px 22px;
+}
+
+.content-shell > .two-col > .panel {
+  padding: 16px;
+}
+
+.content-shell > .two-col > form.panel,
+.content-shell > .two-col > div.panel {
+  padding: 20px 22px;
+}
+
+.panel-title {
+  margin-bottom: 16px;
+}
+
+.panel-heading {
+  color: var(--texto);
+  font-family: var(--font-display), serif;
+  font-size: 1.35rem !important;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.panel-subcopy {
+  color: var(--leve);
+  font-size: 0.8rem;
+}
+
+.panel-meta .pill,
+.status-row .pill {
+  border: 1px solid var(--borda);
+  border-radius: 20px;
+  padding: 4px 10px;
+  background: var(--azul-soft);
+  color: var(--azul);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.field > span,
+.section-label {
+  color: var(--leve);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.input-shell,
+.select-shell,
+.textarea-shell,
+.multi-select-trigger {
+  border: 1.5px solid var(--borda);
+  border-radius: 10px;
+  background: var(--cinza);
+  box-shadow: none;
+  transform: none;
+}
+
+.input-shell:focus-within,
+.select-shell:focus-within,
+.textarea-shell:focus-within,
+.multi-select-trigger:focus-visible {
+  border-color: var(--azul2);
+  box-shadow: 0 0 0 3px rgba(37, 99, 176, 0.1);
+  transform: none;
+}
+
+.input-shell input,
+.select-shell select,
+.textarea-shell textarea {
+  padding: 10px 14px;
+  color: var(--texto);
+  font-size: 0.88rem;
+}
+
+.textarea-shell textarea {
+  min-height: 104px;
+}
+
+.form-section {
+  gap: 12px;
+  border-top: 1px solid var(--borda);
+  padding-top: 18px;
+}
+
+.form-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.section-heading {
+  color: var(--leve);
+  font-size: 0.76rem !important;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+
+.patient-list {
+  max-height: calc(100vh - 230px);
+  gap: 8px;
+}
+
+.patient-list-item {
+  border: 1.5px solid var(--borda);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--branco);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.patient-list-item:hover,
+.patient-list-item.active {
+  border-color: var(--azul2);
+  background: var(--azul-soft);
+}
+
+.patient-list-item strong {
+  color: var(--texto);
+  font-size: 0.86rem;
+}
+
+.patient-list-item span {
+  color: var(--leve);
+  font-size: 0.74rem;
+}
+
+.btn {
+  border: 1.5px solid var(--borda);
+  border-radius: 10px;
+  padding: 10px 16px;
+  background: var(--branco);
+  color: var(--texto);
+  font-size: 0.84rem;
+  font-weight: 800;
+  transform: none;
+}
+
+.btn:hover,
+.btn:focus-visible {
+  border-color: var(--azul2);
+  background: var(--azul-soft);
+  color: var(--azul);
+  transform: none;
+}
+
+.btn-primary {
+  border-color: var(--azul);
+  background: var(--azul);
+  color: #fff;
+}
+
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  border-color: var(--azul2);
+  background: var(--azul2);
+  color: #fff;
+}
+
+.btn-secondary {
+  border-color: var(--azul-soft);
+  background: var(--azul-soft);
+  color: var(--azul);
+}
+
+.chip-row {
+  gap: 6px;
+}
+
+.chip {
+  border: 1px solid var(--borda);
+  border-radius: 20px;
+  padding: 5px 12px;
+  background: var(--branco);
+  color: var(--leve);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.chip.active {
+  border-color: var(--azul2);
+  background: var(--azul-soft);
+  color: var(--azul);
+}
+
+.subtle-divider {
+  background: var(--borda);
+}
+
+.calendar-toolbar {
+  align-items: end;
+  border: 1.5px solid var(--borda);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: var(--branco);
+}
+
+.calendar-grid {
+  gap: 10px;
+  grid-template-columns: repeat(7, minmax(180px, 1fr));
+}
+
+.calendar-day {
+  min-height: 220px;
+  border: 1.5px solid var(--borda);
+  border-radius: 14px;
+  background: var(--branco);
+}
+
+.calendar-day header {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--borda);
+}
+
+.calendar-day h4 {
+  color: var(--texto);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.calendar-event {
+  width: 100%;
+  border: 1.5px solid var(--borda);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--branco);
+  text-align: left;
+}
+
+.calendar-event.source-agendamento {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+}
+
+.calendar-event.source-entrada {
+  border-color: #bbf7d0;
+  background: #f0fff4;
+}
+
+.calendar-event strong {
+  color: var(--texto);
+  font-size: 0.84rem;
+}
+
+.calendar-event span {
+  color: var(--leve);
+  font-size: 0.74rem;
+}
+
+.empty-state {
+  border-color: var(--borda);
+  border-radius: 12px;
+  background: var(--cinza);
+  color: var(--leve);
+  font-size: 0.84rem;
+}
+
+.payment-switch {
+  background: var(--verm-soft);
+}
+
+.payment-switch.active {
+  background: var(--verde-soft);
+}
+
+@media (max-width: 1180px) {
+  .content-shell > .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-list {
+    max-height: 360px;
+  }
+
+  .calendar-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .content-shell > .two-col,
+  .content-shell > .panel {
+    padding: 16px;
+  }
+
+  .content-shell > .panel {
+    margin: 16px;
+  }
+
+  .calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-toolbar {
+    align-items: stretch;
   }
 }

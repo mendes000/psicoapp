@@ -250,6 +250,7 @@ function PatientPanel({
 }) {
   const patientEntries = usePatientEntries(entries, patient);
   const [exportOpen, setExportOpen] = useState(false);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [toast, setToast] = useState("");
   const unpaidEntries = patientEntries.filter(
     (entry) => toNumber(entry.valor_sessao) > toNumber(entry.valor_pago),
@@ -271,6 +272,9 @@ function PatientPanel({
     0,
   );
   const sessionValue = sessionPrice(patientEntries);
+  const visiblePaidEntries = showAllSessions ? paidEntries : paidEntries.slice(0, 12);
+  const visibleProntuarioEntries = showAllSessions ? patientEntries : patientEntries.slice(0, 20);
+  const hasHiddenSessions = paidEntries.length > 12 || patientEntries.length > 20;
 
   useEffect(() => {
     if (!toast) {
@@ -454,12 +458,23 @@ function PatientPanel({
           </div>
         )}
 
-        <div className="sec-titulo">Historico de pagamentos</div>
+        <div className="section-heading-row patient-section-row">
+          <div className="sec-titulo">Historico de pagamentos</div>
+          {hasHiddenSessions && (
+            <button
+              className="section-action-btn"
+              type="button"
+              onClick={() => setShowAllSessions((current) => !current)}
+            >
+              {showAllSessions ? "Ver ultimas sessoes" : "Ver todas as sessoes"}
+            </button>
+          )}
+        </div>
         <div className="pgto-list">
           {paidEntries.length === 0 ? (
             <div className="empty-state">Nenhum pagamento registrado.</div>
           ) : (
-            paidEntries.slice(0, 12).map((entry, index) => (
+            visiblePaidEntries.map((entry, index) => (
               <div className="pgto-item" key={rowKey(patient.key, entry, index)}>
                 <div className="pgto-top">
                   <div>
@@ -539,11 +554,23 @@ function PatientPanel({
           onUpdatePatientObservation={onUpdatePatientObservation}
           patient={patient}
         />
+        <div className="section-heading-row patient-section-row">
+          <div className="sec-titulo">Sessoes do prontuario</div>
+          {hasHiddenSessions && (
+            <button
+              className="section-action-btn"
+              type="button"
+              onClick={() => setShowAllSessions((current) => !current)}
+            >
+              {showAllSessions ? "Ver ultimas sessoes" : "Ver todas as sessoes"}
+            </button>
+          )}
+        </div>
         <div className="pront-lista">
           {patientEntries.length === 0 ? (
             <div className="empty-state">Nenhuma anotacao encontrada para este paciente.</div>
           ) : (
-            patientEntries.slice(0, 20).map((entry, index) => (
+            visibleProntuarioEntries.map((entry, index) => (
               <ProntuarioItem
                 entry={entry}
                 initiallyOpen={index === 0}

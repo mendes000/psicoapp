@@ -353,6 +353,9 @@ export function SessionsView({
                 >
                   <option value="Sessao Individual">Sessao Individual</option>
                   <option value="Avaliacao">Avaliacao</option>
+                  <option value="Falta - sem aviso">Falta - sem aviso</option>
+                  <option value="Falta - avisou mesmo dia">Falta - avisou mesmo dia</option>
+                  <option value="Remarcacao">Remarcacao</option>
                 </select>
               </div>
             </label>
