@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   Patient,
@@ -32,6 +32,7 @@ interface PatientsViewProps {
   columns: PatientColumnMap;
   selectedRequest: PatientSelectionRequest | null;
   onSelectionHandled: () => void;
+  onLoadPatientDetail: (patientId: string) => Promise<Patient>;
   onSavePatient: (
     form: PatientFormValues,
     existing: Patient | null,
@@ -43,14 +44,19 @@ export function PatientsView({
   columns,
   selectedRequest,
   onSelectionHandled,
+  onLoadPatientDetail,
   onSavePatient,
 }: PatientsViewProps) {
   const [selectedKey, setSelectedKey] = useState(CREATE_NEW_KEY);
   const [form, setForm] = useState<PatientFormValues>(emptyPatientForm());
+  const [patientDetailsById, setPatientDetailsById] = useState<Record<string, Patient>>({});
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [newTreatment, setNewTreatment] = useState("");
   const [cepFeedback, setCepFeedback] = useState("");
+  const detailRequestIdRef = useRef(0);
   const parsedTreatments = useMemo(
     () => parseTreatments(form.tratamento),
     [form.tratamento],
@@ -90,12 +96,14 @@ export function PatientsView({
       const name = normalizeText(patient.nome);
       const email = String(patient.email ?? "").toLowerCase();
       const cpf = String(patient.cpf ?? "").toLowerCase();
+      const phone = String(patient.telefone ?? "").toLowerCase();
 
       return (
         name.includes(key) ||
         similarity(name, key) >= 0.72 ||
         email.includes(lowered) ||
-        cpf.includes(lowered)
+        cpf.includes(lowered) ||
+        phone.includes(lowered)
       );
     });
   }, [deferredSearch, patients]);
@@ -116,8 +124,7 @@ export function PatientsView({
     );
 
     if (nextPatient) {
-      setSelectedKey(patientRecordKey(nextPatient));
-      setForm(patientToFormValues(nextPatient, columns));
+      selectPatient(nextPatient);
     }
 
     onSelectionHandled();
@@ -173,20 +180,78 @@ export function PatientsView({
   }, [form.cep]);
 
   function currentPatient() {
-    return patients.find((patient) => patientRecordKey(patient) === selectedKey) ?? null;
+    const patient = patients.find((item) => patientRecordKey(item) === selectedKey) ?? null;
+    if (!patient) {
+      return null;
+    }
+
+    const patientId = detailKey(patient);
+    return patientId ? patientDetailsById[patientId] ?? patient : patient;
   }
 
   function selectPatient(patient: Patient | null) {
+    detailRequestIdRef.current += 1;
+
     if (!patient) {
       setSelectedKey(CREATE_NEW_KEY);
       setForm(emptyPatientForm());
       setNewTreatment("");
+      setDetailLoading(false);
+      setDetailError("");
       return;
     }
 
     setSelectedKey(patientRecordKey(patient));
-    setForm(patientToFormValues(patient, columns));
     setNewTreatment("");
+    setDetailError("");
+
+    const patientId = detailKey(patient);
+    const cachedDetail = patientId ? patientDetailsById[patientId] : undefined;
+
+    if (!patientId) {
+      setDetailLoading(false);
+      setForm(patientToFormValues(patient, columns));
+      return;
+    }
+
+    if (cachedDetail) {
+      setDetailLoading(false);
+      setForm(patientToFormValues(cachedDetail, columns));
+      return;
+    }
+
+    setDetailLoading(true);
+    setForm(patientToFormValues(patient, columns));
+    void hydratePatientDetail(patientId);
+  }
+
+  async function hydratePatientDetail(patientId: string) {
+    const requestId = detailRequestIdRef.current;
+
+    try {
+      const detail = await onLoadPatientDetail(patientId);
+
+      if (detailRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setPatientDetailsById((current) => ({
+        ...current,
+        [patientId]: detail,
+      }));
+      setForm(patientToFormValues(detail, columns));
+      setDetailError("");
+    } catch (error) {
+      if (detailRequestIdRef.current === requestId) {
+        setDetailError(
+          error instanceof Error ? error.message : "Falha ao carregar a ficha do paciente.",
+        );
+      }
+    } finally {
+      if (detailRequestIdRef.current === requestId) {
+        setDetailLoading(false);
+      }
+    }
   }
 
   function toggleTreatment(treatment: string) {
@@ -313,6 +378,9 @@ export function PatientsView({
             </p>
           </div>
         </div>
+
+        {detailLoading && <p className="helper-text">Carregando ficha do paciente...</p>}
+        {detailError && <p className="helper-text">{detailError}</p>}
 
         <section className="form-section">
           <h3 className="section-heading">Origem e ID</h3>
@@ -668,7 +736,7 @@ export function PatientsView({
         {cepFeedback && <p className="helper-text">{cepFeedback}</p>}
 
         <div className="actions-row">
-          <button className="btn btn-primary" disabled={saving} type="submit">
+          <button className="btn btn-primary" disabled={saving || detailLoading} type="submit">
             {saving
               ? "Salvando..."
               : selectedKey === CREATE_NEW_KEY
@@ -686,4 +754,10 @@ export function PatientsView({
       </form>
     </section>
   );
+}
+
+function detailKey(patient: Patient) {
+  return patient.id === null || patient.id === undefined || patient.id === ""
+    ? ""
+    : String(patient.id);
 }

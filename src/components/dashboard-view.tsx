@@ -1,7 +1,8 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { loadEntryDetail } from "../lib/data";
 import type { DashboardSnapshot, Entry } from "../lib/types";
 import {
   calculateAge,
@@ -87,7 +88,7 @@ export function DashboardView({
     void onLoadSnapshot({
       search: deferredSearch,
       reviewOnly,
-      itemLimit: 5000,
+      itemLimit: 100,
     })
       .then((nextSnapshot) => {
         if (!cancelled) {
@@ -248,7 +249,17 @@ function PatientPanel({
   }) => Promise<void>;
   patient: DashboardSnapshot["items"][number];
 }) {
-  const patientEntries = usePatientEntries(entries, patient);
+  const basePatientEntries = usePatientEntries(entries, patient);
+  const [entryDetailsById, setEntryDetailsById] = useState<Record<string, Entry>>({});
+  const requestedEntryDetailIdsRef = useRef(new Set<string>());
+  const patientEntries = useMemo(
+    () =>
+      basePatientEntries.map((entry) => {
+        const entryId = detailKey(entry);
+        return entryId ? { ...entry, ...entryDetailsById[entryId] } : entry;
+      }),
+    [basePatientEntries, entryDetailsById],
+  );
   const [exportOpen, setExportOpen] = useState(false);
   const [showAllSessions, setShowAllSessions] = useState(false);
   const [toast, setToast] = useState("");
@@ -284,6 +295,52 @@ function PatientPanel({
     const timer = window.setTimeout(() => setToast(""), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const entryIdsToLoad = basePatientEntries
+      .map(detailKey)
+      .filter(
+        (entryId) =>
+          Boolean(entryId) &&
+          !requestedEntryDetailIdsRef.current.has(entryId),
+      );
+
+    if (entryIdsToLoad.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    entryIdsToLoad.forEach((entryId) => requestedEntryDetailIdsRef.current.add(entryId));
+
+    void Promise.all(
+      entryIdsToLoad.map(async (entryId) => {
+        try {
+          return [entryId, await loadEntryDetail(entryId)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((details) => {
+      if (cancelled) {
+        return;
+      }
+
+      const loadedDetails = details.filter(
+        (detail): detail is readonly [string, Entry] => detail !== null,
+      );
+
+      if (loadedDetails.length > 0) {
+        setEntryDetailsById((current) => ({
+          ...current,
+          ...Object.fromEntries(loadedDetails),
+        }));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [basePatientEntries]);
 
   function handleExport(kind: "prontuario" | "financeiro" | "ficha" | "tudo") {
     const labels = {
@@ -572,6 +629,7 @@ function PatientPanel({
           ) : (
             visibleProntuarioEntries.map((entry, index) => (
               <ProntuarioItem
+                detailLoading={isEntryDetailLoading(entry, entryDetailsById)}
                 entry={entry}
                 initiallyOpen={index === 0}
                 index={patientEntries.length - index}
@@ -700,16 +758,21 @@ function AbsenceItem({ entry }: { entry: Entry }) {
 }
 
 function ProntuarioItem({
+  detailLoading,
   entry,
   index,
   initiallyOpen,
 }: {
+  detailLoading: boolean;
   entry: Entry;
   index: number;
   initiallyOpen: boolean;
 }) {
   const [open, setOpen] = useState(initiallyOpen);
   const note = String(entry.anotacoes_clinicas ?? "").trim();
+  const noteLabel = detailLoading
+    ? "Carregando anotações..."
+    : note || "(evolucao clinica nao preenchida)";
 
   return (
     <article className="pront-item">
@@ -720,12 +783,12 @@ function ProntuarioItem({
       >
         <div>
           <div className="pront-dt">{formatDateTimeBr(entry.data)} · {index}a sessao</div>
-          <div className="pront-resumo">{note || "(evolucao clinica nao preenchida)"}</div>
+          <div className="pront-resumo">{noteLabel}</div>
         </div>
         <span className={`pront-seta ${open ? "aberto" : ""}`}>v</span>
       </button>
       <div className={`pront-corpo ${open ? "on" : ""}`}>
-        {note || "(evolucao clinica nao preenchida)"}
+        {noteLabel}
       </div>
     </article>
   );
@@ -981,6 +1044,21 @@ function safeFilename(value: string) {
 
 function rowKey(patientKey: string, entry: Entry, index: number) {
   return [patientKey, entry.id ?? "sem-id", entry.data ?? "sem-data", index].join("-");
+}
+
+function detailKey(entry: Entry) {
+  return entry.id === null || entry.id === undefined || entry.id === ""
+    ? ""
+    : String(entry.id);
+}
+
+function isEntryDetailLoading(entry: Entry, detailsById: Record<string, Entry>) {
+  const entryId = detailKey(entry);
+  return Boolean(
+    entryId &&
+      entry.anotacoes_clinicas === undefined &&
+      !Object.prototype.hasOwnProperty.call(detailsById, entryId),
+  );
 }
 
 function fichaItems(patient: DashboardSnapshot["items"][number]): Array<[string, string, boolean?]> {

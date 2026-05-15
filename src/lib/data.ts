@@ -23,7 +23,9 @@ import {
 type TableName = "pacientes" | "entradas" | "agendamentos";
 
 const PAGE_SIZE = 1000;
-const PATIENT_COLUMNS = [
+const MAX_DATASET_ROWS = 500;
+const PATIENT_LIST_COLUMNS = "id,nome,cpf,email,telefone,tratamento";
+const PATIENT_DETAIL_COLUMNS = [
   "id",
   "nome",
   "nascimento",
@@ -49,7 +51,15 @@ const PATIENT_COLUMNS = [
   "observacoees",
   "observacoes",
 ].join(",");
-const ENTRY_COLUMNS = [
+const ENTRY_LIST_COLUMNS = [
+  "id",
+  "data",
+  "nome",
+  "tipo",
+  "valor_sessao",
+  "valor_pago",
+].join(",");
+const ENTRY_DETAIL_COLUMNS = [
   "id",
   "data",
   "nome",
@@ -83,17 +93,30 @@ async function fetchAllRowsWithColumns<T>(
   columns: string,
   orderBy: string,
   ascending = true,
+  minimumDate?: string,
+  maximumDate?: string,
 ) {
   const supabase = getSupabaseBrowserClient();
   const records: T[] = [];
   let from = 0;
 
   while (true) {
-    const { data, error } = await supabase
+    const remainingRowsBeforeLimit = MAX_DATASET_ROWS + 1 - from;
+    const currentPageSize = Math.min(PAGE_SIZE, remainingRowsBeforeLimit);
+    let query = supabase
       .from(table)
       .select(columns)
-      .order(orderBy, { ascending })
-      .range(from, from + PAGE_SIZE - 1);
+      .order(orderBy, { ascending });
+
+    if (minimumDate) {
+      query = query.gte("data", minimumDate);
+    }
+
+    if (maximumDate) {
+      query = query.lte("data", maximumDate);
+    }
+
+    const { data, error } = await query.range(from, from + currentPageSize - 1);
 
     if (error) {
       throw error;
@@ -102,11 +125,17 @@ async function fetchAllRowsWithColumns<T>(
     const batch = (data ?? []) as T[];
     records.push(...batch);
 
-    if (batch.length < PAGE_SIZE) {
+    if (records.length > MAX_DATASET_ROWS) {
+      throw new Error(
+        `Limite de seguranca excedido ao carregar ${table}: mais de ${MAX_DATASET_ROWS} registros.`,
+      );
+    }
+
+    if (batch.length < currentPageSize) {
       break;
     }
 
-    from += PAGE_SIZE;
+    from += batch.length;
   }
 
   return records;
@@ -117,28 +146,193 @@ async function fetchAllRowsWithFallback<T>(
   columns: string,
   orderBy: string,
   ascending = true,
+  minimumDate?: string,
+  maximumDate?: string,
 ) {
-  try {
-    return await fetchAllRowsWithColumns<T>(table, columns, orderBy, ascending);
-  } catch (error) {
-    if (columns === "*") {
-      throw error;
-    }
-
-    return fetchAllRowsWithColumns<T>(table, "*", orderBy, ascending);
-  }
+  return fetchAllRowsWithColumns<T>(
+    table,
+    columns,
+    orderBy,
+    ascending,
+    minimumDate,
+    maximumDate,
+  );
 }
 
 export async function loadPatients() {
-  return fetchAllRowsWithFallback<Patient>("pacientes", PATIENT_COLUMNS, "nome", true);
+  return fetchAllRowsWithFallback<Patient>("pacientes", PATIENT_LIST_COLUMNS, "nome", true);
+}
+
+export async function loadPatientDetail(patientId: string): Promise<Patient> {
+  const supabase = getSupabaseBrowserClient();
+
+  try {
+    const { data, error } = await supabase.rpc("buscar_paciente_detalhe", {
+      p_id: patientId,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      return data as Patient;
+    }
+  } catch {
+    // Fall through to the direct select while deployments catch up with the RPC.
+  }
+
+  const { data, error } = await supabase
+    .from("pacientes")
+    .select(PATIENT_DETAIL_COLUMNS)
+    .eq("id", patientId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    throw new Error("Paciente nao encontrado.");
+  }
+
+  return data as unknown as Patient;
 }
 
 export async function loadEntries() {
-  return fetchAllRowsWithFallback<Entry>("entradas", ENTRY_COLUMNS, "data", false);
+  const startDate = new Date();
+  startDate.setFullYear(startDate.getFullYear() - 1);
+
+  return fetchAllRowsWithFallback<Entry>(
+    "entradas",
+    ENTRY_LIST_COLUMNS,
+    "data",
+    false,
+    startDate.toISOString(),
+  );
+}
+
+export async function loadEntryDetail(entryId: string): Promise<Entry> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase
+    .from("entradas")
+    .select(ENTRY_DETAIL_COLUMNS)
+    .eq("id", entryId)
+    .limit(1)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as unknown as Entry;
 }
 
 export async function loadSchedules() {
-  return fetchAllRowsWithFallback<Schedule>("agendamentos", SCHEDULE_COLUMNS, "data", true);
+  const startDate = new Date();
+  startDate.setMonth(startDate.getMonth() - 3);
+  const endDate = new Date();
+  endDate.setMonth(endDate.getMonth() + 6);
+
+  return fetchAllRowsWithFallback<Schedule>(
+    "agendamentos",
+    SCHEDULE_COLUMNS,
+    "data",
+    true,
+    startDate.toISOString(),
+    endDate.toISOString(),
+  );
+}
+
+export async function loadCalendarEvents(
+  startDate: Date,
+  endDate: Date,
+  fallback?: {
+    entries?: Entry[];
+    schedules?: Schedule[];
+  },
+): Promise<{
+  entradas: Entry[];
+  agendamentos: Schedule[];
+}> {
+  const supabase = getSupabaseBrowserClient();
+
+  try {
+    const { data, error } = await supabase.rpc("buscar_eventos_calendario", {
+      p_start: startDate.toISOString(),
+      p_end: endDate.toISOString(),
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const payload =
+      data && typeof data === "object"
+        ? (data as { entradas?: unknown; agendamentos?: unknown })
+        : {};
+
+    return {
+      entradas: Array.isArray(payload.entradas) ? (payload.entradas as Entry[]) : [],
+      agendamentos: Array.isArray(payload.agendamentos)
+        ? (payload.agendamentos as Schedule[])
+        : [],
+    };
+  } catch {
+    return {
+      entradas: filterRowsByDateRange(fallback?.entries ?? [], startDate, endDate),
+      agendamentos: filterRowsByDateRange(fallback?.schedules ?? [], startDate, endDate),
+    };
+  }
+}
+
+export async function loadSessions(options: {
+  search?: string;
+  fromDate?: Date;
+  toDate?: Date;
+  limit?: number;
+  offset?: number;
+  entries?: Entry[];
+}): Promise<{ items: Entry[]; total: number }> {
+  const supabase = getSupabaseBrowserClient();
+  const search = String(options.search ?? "").trim();
+  const limit = Math.max(options.limit ?? 30, 1);
+  const offset = Math.max(options.offset ?? 0, 0);
+
+  try {
+    const { data, error } = await supabase.rpc("buscar_sessoes", {
+      p_search: search || null,
+      p_from_date: options.fromDate?.toISOString() ?? null,
+      p_to_date: options.toDate?.toISOString() ?? null,
+      p_limit: limit,
+      p_offset: offset,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const payload =
+      data && typeof data === "object"
+        ? (data as { items?: unknown; total?: unknown })
+        : {};
+
+    return {
+      items: Array.isArray(payload.items) ? (payload.items as Entry[]) : [],
+      total: typeof payload.total === "number" ? payload.total : 0,
+    };
+  } catch {
+    const filtered = filterSessionRows(options.entries ?? [], {
+      search,
+      fromDate: options.fromDate,
+      toDate: options.toDate,
+    });
+
+    return {
+      items: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+    };
+  }
 }
 
 function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
@@ -154,6 +348,66 @@ function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
     typeof snapshot.limited === "boolean" &&
     Array.isArray(snapshot.items)
   );
+}
+
+function filterRowsByDateRange<T extends { data?: string | null }>(
+  rows: T[],
+  startDate: Date,
+  endDate: Date,
+) {
+  const startTime = startDate.getTime();
+  const endTime = endDate.getTime();
+
+  return rows.filter((row) => {
+    const date = parseFlexibleDate(row.data);
+    if (!date) {
+      return false;
+    }
+
+    const time = date.getTime();
+    return time >= startTime && time <= endTime;
+  });
+}
+
+function filterSessionRows(
+  entries: Entry[],
+  options: {
+    search: string;
+    fromDate?: Date;
+    toDate?: Date;
+  },
+) {
+  const search = options.search.toLowerCase();
+  const fromTime = options.fromDate?.getTime();
+  const toTime = options.toDate?.getTime();
+
+  return entries
+    .filter((entry) => {
+      const date = parseFlexibleDate(entry.data);
+      const time = date?.getTime();
+
+      if (fromTime !== undefined && (time === undefined || time < fromTime)) {
+        return false;
+      }
+
+      if (toTime !== undefined && (time === undefined || time > toTime)) {
+        return false;
+      }
+
+      if (!search) {
+        return true;
+      }
+
+      return (
+        String(entry.nome ?? "").toLowerCase().includes(search) ||
+        String(entry.obs ?? "").toLowerCase().includes(search)
+      );
+    })
+    .sort((left, right) => {
+      const leftTime = parseFlexibleDate(left.data)?.getTime() ?? 0;
+      const rightTime = parseFlexibleDate(right.data)?.getTime() ?? 0;
+      return rightTime - leftTime;
+    });
 }
 
 export async function loadDashboardSnapshot(options?: {
@@ -184,8 +438,8 @@ export async function loadDashboardSnapshot(options?: {
     return data;
   } catch {
     try {
-      const [patients, entries] = await Promise.all([loadPatients(), loadEntries()]);
-      return buildDashboardSnapshot(patients, entries, {
+      const entries = await loadEntries();
+      return buildDashboardSnapshot([], entries, {
         search,
         reviewOnly,
         itemLimit,

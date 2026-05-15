@@ -2,6 +2,7 @@
 
 import type { Session } from "@supabase/supabase-js";
 import {
+  useCallback,
   useMemo,
   useRef,
   startTransition,
@@ -18,10 +19,13 @@ import { PatientsView } from "./patients-view";
 import { SessionsView } from "./sessions-view";
 import {
   createScheduleRecord,
+  loadCalendarEvents,
   loadDashboardSnapshot,
   loadEntries,
+  loadPatientDetail,
   loadPatients,
   loadSchedules,
+  loadSessions,
   saveSessionRecord,
   signOutSupabase,
   updateEntryFinancialRecord,
@@ -44,7 +48,6 @@ import type {
 } from "../lib/types";
 import {
   buildDashboardSnapshot,
-  buildCalendarEvents,
   collectPatientColumns,
   emptySessionForm,
   entryToSessionForm,
@@ -85,18 +88,12 @@ export function PsicoApp() {
   const sessionUserId = session?.user.id ?? null;
   const isPanelReady = dashboardStatus === "ready";
   const isPatientsReady = patientsStatus === "ready";
-  const isSessionsReady =
-    patientsStatus === "ready" &&
-    entriesStatus === "ready" &&
-    schedulesStatus === "ready";
-  const isCalendarReady =
-    entriesStatus === "ready" &&
-    schedulesStatus === "ready";
+  const isSessionsReady = patientsStatus === "ready";
+  const isCalendarReady = true;
   const panelHasVisibleData = (dashboardSnapshot?.items.length ?? 0) > 0;
   const patientsHasVisibleData = patients.length > 0;
-  const sessionsHasVisibleData =
-    patients.length > 0 || entries.length > 0 || schedules.length > 0;
-  const calendarHasVisibleData = entries.length > 0 || schedules.length > 0;
+  const sessionsHasVisibleData = patientsStatus === "ready";
+  const calendarHasVisibleData = true;
   const currentViewHasVisibleData =
     activeView === "painel"
       ? panelHasVisibleData
@@ -105,13 +102,17 @@ export function PsicoApp() {
         : activeView === "sessoes"
           ? sessionsHasVisibleData
           : calendarHasVisibleData;
-  const calendarEvents = useMemo(
-    () => buildCalendarEvents(entries, schedules),
-    [entries, schedules],
-  );
   const patientColumns = useMemo(
     () => collectPatientColumns(patients),
     [patients],
+  );
+  const handleLoadCalendarEvents = useCallback(
+    (startDate: Date, endDate: Date) =>
+      loadCalendarEvents(startDate, endDate, {
+        entries,
+        schedules,
+      }),
+    [entries, schedules],
   );
 
   useEffect(() => {
@@ -194,14 +195,15 @@ export function PsicoApp() {
 
   async function loadWithRetry<T>(loader: () => Promise<T>, retries = 1) {
     let lastError: unknown;
+    const boundedRetries = Math.min(Math.max(retries, 0), 1);
 
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
+    for (let attempt = 0; attempt <= boundedRetries; attempt += 1) {
       try {
         return await loader();
       } catch (error) {
         lastError = error;
 
-        if (attempt < retries) {
+        if (attempt < boundedRetries) {
           await waitForRetry(450 * (attempt + 1));
         }
       }
@@ -551,18 +553,11 @@ export function PsicoApp() {
     }
 
     if (activeView === "sessoes") {
-      await Promise.all([
-        ensurePatientsLoaded({ userId: sessionUserId, force: true }),
-        ensureEntriesLoaded({ userId: sessionUserId, force: true }),
-        ensureSchedulesLoaded({ userId: sessionUserId, force: true }),
-      ]);
+      await ensurePatientsLoaded({ userId: sessionUserId, force: true });
       return;
     }
 
-    await Promise.all([
-      ensureEntriesLoaded({ userId: sessionUserId, force: true }),
-      ensureSchedulesLoaded({ userId: sessionUserId, force: true }),
-    ]);
+    return;
   }
 
   const applySession = useEffectEvent(
@@ -699,19 +694,12 @@ export function PsicoApp() {
     }
 
     if (activeView === "sessoes") {
-      void Promise.all([
-        ensurePatientsLoaded({ userId }),
-        ensureEntriesLoaded({ userId }),
-        ensureSchedulesLoaded({ userId }),
-      ]);
+      void ensurePatientsLoaded({ userId });
       return;
     }
 
     if (activeView === "calendario") {
-      void Promise.all([
-        ensureEntriesLoaded({ userId }),
-        ensureSchedulesLoaded({ userId }),
-      ]);
+      return;
     }
   }, [activeView, sessionUserId]);
 
@@ -756,10 +744,7 @@ export function PsicoApp() {
         return;
       }
 
-      if (
-        (patientsStatus === "error" || entriesStatus === "error" || schedulesStatus === "error") &&
-        !sessionsHasVisibleData
-      ) {
+      if (patientsStatus === "error" && !sessionsHasVisibleData) {
         setInitialLoadState("error");
         return;
       }
@@ -1245,6 +1230,7 @@ export function PsicoApp() {
           {activeView === "pacientes" && (
             <PatientsView
               columns={patientColumns}
+              onLoadPatientDetail={loadPatientDetail}
               onSavePatient={handleSavePatient}
               onSelectionHandled={handlePatientRequestConsumed}
               patients={patients}
@@ -1254,7 +1240,8 @@ export function PsicoApp() {
 
           {activeView === "sessoes" && (
             <SessionsView
-              entries={entries}
+              fallbackEntries={entries}
+              onLoadSessions={loadSessions}
               onSaveSession={handleSaveSession}
               onSchedule={handleSchedule}
               onSeedConsumed={handleSessionSeedConsumed}
@@ -1265,7 +1252,7 @@ export function PsicoApp() {
 
           {activeView === "calendario" && (
             <CalendarView
-              events={calendarEvents}
+              onLoadCalendarEvents={handleLoadCalendarEvents}
               onCreateAt={requestSessionAt}
               onOpenEvent={requestEventEdition}
             />

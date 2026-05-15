@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { CalendarEvent } from "../lib/types";
+import type { CalendarEvent, Entry, Schedule } from "../lib/types";
 import {
   addDays,
+  buildCalendarEvents,
   formatCurrency,
   formatDateBr,
   isSameDate,
@@ -18,19 +19,61 @@ import {
 type CalendarMode = "Semanal" | "Mensal";
 
 interface CalendarViewProps {
-  events: CalendarEvent[];
+  onLoadCalendarEvents: (
+    startDate: Date,
+    endDate: Date,
+  ) => Promise<{
+    entradas: Entry[];
+    agendamentos: Schedule[];
+  }>;
   onCreateAt: (date: string, time: string) => void;
   onOpenEvent: (event: CalendarEvent) => void;
 }
 
 export function CalendarView({
-  events,
+  onLoadCalendarEvents,
   onCreateAt,
   onOpenEvent,
 }: CalendarViewProps) {
   const [mode, setMode] = useState<CalendarMode>("Semanal");
   const [anchor, setAnchor] = useState(new Date());
   const [defaultTime, setDefaultTime] = useState("09:00");
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const weekDays = useMemo(() => {
+    const weekStart = startOfWeek(anchor);
+    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  }, [anchor]);
+
+  const monthDays = useMemo(() => {
+    const monthBounds = monthGridBounds(anchor);
+    const days: Date[] = [];
+
+    for (
+      let cursor = new Date(monthBounds.start);
+      cursor <= monthBounds.end;
+      cursor = addDays(cursor, 1)
+    ) {
+      days.push(cursor);
+    }
+
+    return days;
+  }, [anchor]);
+
+  const visibleDays = mode === "Semanal" ? weekDays : monthDays;
+  const visibleRange = useMemo(
+    () => ({
+      start: visibleDays[0],
+      end: endOfDay(visibleDays[visibleDays.length - 1]),
+    }),
+    [visibleDays],
+  );
+  const events = useMemo(
+    () => buildCalendarEvents(entries, schedules),
+    [entries, schedules],
+  );
 
   const eventsMap = useMemo(() => {
     const nextMap = new Map<string, CalendarEvent[]>();
@@ -59,27 +102,27 @@ export function CalendarView({
     setAnchor((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
   }
 
-  const weekDays = useMemo(() => {
-    const weekStart = startOfWeek(anchor);
-    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-  }, [anchor]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
 
-  const monthDays = useMemo(() => {
-    const monthBounds = monthGridBounds(anchor);
-    const days: Date[] = [];
+    void onLoadCalendarEvents(visibleRange.start, visibleRange.end)
+      .then(({ entradas, agendamentos }) => {
+        if (!cancelled) {
+          setEntries(entradas);
+          setSchedules(agendamentos);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
 
-    for (
-      let cursor = new Date(monthBounds.start);
-      cursor <= monthBounds.end;
-      cursor = addDays(cursor, 1)
-    ) {
-      days.push(cursor);
-    }
-
-    return days;
-  }, [anchor]);
-
-  const visibleDays = mode === "Semanal" ? weekDays : monthDays;
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadCalendarEvents, visibleRange]);
 
   return (
     <section className="panel reveal">
@@ -139,7 +182,9 @@ export function CalendarView({
             ? `${formatDateBr(weekDays[0])} a ${formatDateBr(weekDays[6])}`
             : anchor.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}
         </span>
-        <span className="pill">{events.length} eventos totais</span>
+        <span className="pill">
+          {loading ? "Carregando eventos..." : `${events.length} eventos totais`}
+        </span>
       </div>
 
       <div className="calendar-grid">
@@ -210,4 +255,10 @@ export function CalendarView({
       </div>
     </section>
   );
+}
+
+function endOfDay(date: Date) {
+  const clone = new Date(date);
+  clone.setHours(23, 59, 59, 999);
+  return clone;
 }

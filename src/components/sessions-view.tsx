@@ -1,7 +1,8 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { loadEntryDetail } from "../lib/data";
 import type {
   Entry,
   Patient,
@@ -14,16 +15,23 @@ import {
   entryToSessionForm,
   formatCurrency,
   formatDateTimeBr,
-  normalizeText,
   parseFlexibleDate,
-  similarity,
+  toInputDateValue,
   toInputTimeValue,
   toNumber,
 } from "../lib/utils";
 
 interface SessionsViewProps {
   patients: Patient[];
-  entries: Entry[];
+  fallbackEntries?: Entry[];
+  onLoadSessions: (options: {
+    search?: string;
+    fromDate?: Date;
+    toDate?: Date;
+    limit?: number;
+    offset?: number;
+    entries?: Entry[];
+  }) => Promise<{ items: Entry[]; total: number }>;
   seed: SessionSeed | null;
   onSeedConsumed: () => void;
   onSchedule: (
@@ -38,7 +46,8 @@ interface SessionsViewProps {
 
 export function SessionsView({
   patients,
-  entries,
+  fallbackEntries,
+  onLoadSessions,
   seed,
   onSeedConsumed,
   onSchedule,
@@ -47,9 +56,24 @@ export function SessionsView({
   const [form, setForm] = useState<SessionFormValues>(emptySessionForm());
   const [context, setContext] = useState<SessionEditorContext>({});
   const [busyAction, setBusyAction] = useState<"schedule" | "save" | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [fromDate, setFromDate] = useState(() => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 1);
+    return toInputDateValue(date);
+  });
+  const [toDate, setToDate] = useState(() => toInputDateValue(new Date()));
+  const [page, setPage] = useState(0);
+  const [pageEntries, setPageEntries] = useState<Entry[]>([]);
+  const [totalEntries, setTotalEntries] = useState(0);
+  const [listLoading, setListLoading] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const formPanelRef = useRef<HTMLDivElement | null>(null);
-  const deferredSearch = useDeferredValue(search);
+  const detailRequestIdRef = useRef(0);
+  const listRequestIdRef = useRef(0);
+  const pageSize = 30;
 
   const patientNames = useMemo(
     () =>
@@ -74,39 +98,57 @@ export function SessionsView({
       ...seed.form,
     }));
     setContext(seed.context ?? {});
+    if (seed.context?.entryId !== null && seed.context?.entryId !== undefined && seed.context.entryId !== "") {
+      void hydrateEntryDetail(String(seed.context.entryId));
+    }
     onSeedConsumed();
   }, [onSeedConsumed, seed]);
 
-  const filteredEntries = useMemo(() => {
-    if (!deferredSearch.trim()) {
-      return entries;
-    }
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(0);
+    }, 400);
 
-    const searchValue = deferredSearch.trim();
-    const normalized = normalizeText(searchValue);
-    const lowered = searchValue.toLowerCase();
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-    return entries.filter((entry) => {
-      const name = normalizeText(entry.nome);
+  useEffect(() => {
+    const requestId = listRequestIdRef.current + 1;
+    listRequestIdRef.current = requestId;
+    setListLoading(true);
 
-      return (
-        name.includes(normalized) ||
-        similarity(name, normalized) >= 0.72 ||
-        String(entry.obs ?? "").toLowerCase().includes(lowered)
-      );
-    });
-  }, [deferredSearch, entries]);
+    void onLoadSessions({
+      search: debouncedSearch,
+      fromDate: parseDateInput(fromDate),
+      toDate: endOfInputDay(toDate),
+      limit: pageSize,
+      offset: page * pageSize,
+      entries: fallbackEntries,
+    })
+      .then(({ items, total }) => {
+        if (listRequestIdRef.current === requestId) {
+          setPageEntries(items);
+          setTotalEntries(total);
+        }
+      })
+      .finally(() => {
+        if (listRequestIdRef.current === requestId) {
+          setListLoading(false);
+        }
+      });
+  }, [debouncedSearch, fallbackEntries, fromDate, onLoadSessions, page, refreshVersion, toDate]);
 
   const ticketMedio = useMemo(() => {
-    if (entries.length === 0) {
+    if (pageEntries.length === 0) {
       return 0;
     }
 
     return (
-      entries.reduce((sum, entry) => sum + toNumber(entry.valor_pago), 0) /
-      entries.length
+      pageEntries.reduce((sum, entry) => sum + toNumber(entry.valor_pago), 0) /
+      pageEntries.length
     );
-  }, [entries]);
+  }, [pageEntries]);
   const isPaid = useMemo(() => toNumber(form.valorPago) > 0, [form.valorPago]);
   const canSaveSession = useMemo(() => {
     const date = parseFlexibleDate(`${form.data}T${form.hora}`);
@@ -125,9 +167,31 @@ export function SessionsView({
     return nextValorSessao.trim() || "0";
   }
 
+  async function hydrateEntryDetail(entryId: string) {
+    const requestId = detailRequestIdRef.current + 1;
+    detailRequestIdRef.current = requestId;
+    setDetailLoading(true);
+
+    try {
+      const detail = await loadEntryDetail(entryId);
+      if (detailRequestIdRef.current === requestId) {
+        setForm(entryToSessionForm(detail));
+      }
+    } catch {
+      // Keep the lightweight entry data already present in the form.
+    } finally {
+      if (detailRequestIdRef.current === requestId) {
+        setDetailLoading(false);
+      }
+    }
+  }
+
   function prefillFromEntry(entry: Entry) {
     setForm(entryToSessionForm(entry));
     setContext({ entryId: entry.id });
+    if (entry.id !== null && entry.id !== undefined && entry.id !== "") {
+      void hydrateEntryDetail(String(entry.id));
+    }
 
     window.requestAnimationFrame(() => {
       formPanelRef.current?.scrollIntoView({
@@ -188,6 +252,7 @@ export function SessionsView({
           nome: current.nome,
         }),
       );
+      setRefreshVersion((current) => current + 1);
     } finally {
       setBusyAction(null);
     }
@@ -204,8 +269,8 @@ export function SessionsView({
             </p>
           </div>
           <div className="panel-meta">
-            <span className="pill">{entries.length} sessoes registradas</span>
-            <span className="pill">{filteredEntries.length} visiveis</span>
+            <span className="pill">{totalEntries} sessoes registradas</span>
+            <span className="pill">{pageEntries.length} nesta pagina</span>
             <span className="pill">Ticket medio {formatCurrency(ticketMedio)}</span>
           </div>
         </div>
@@ -221,6 +286,35 @@ export function SessionsView({
           </div>
         </label>
 
+        <div className="input-grid">
+          <label className="field">
+            <span>De</span>
+            <div className="input-shell">
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(event) => {
+                  setFromDate(event.target.value);
+                  setPage(0);
+                }}
+              />
+            </div>
+          </label>
+          <label className="field">
+            <span>Ate</span>
+            <div className="input-shell">
+              <input
+                type="date"
+                value={toDate}
+                onChange={(event) => {
+                  setToDate(event.target.value);
+                  setPage(0);
+                }}
+              />
+            </div>
+          </label>
+        </div>
+
         <div className="subtle-divider" />
 
         <div className="patient-list">
@@ -228,6 +322,8 @@ export function SessionsView({
             className={`patient-list-item ${context.entryId == null ? "active" : ""}`}
             type="button"
             onClick={() => {
+              detailRequestIdRef.current += 1;
+              setDetailLoading(false);
               setContext({});
               setForm(emptySessionForm());
               window.requestAnimationFrame(() => {
@@ -242,7 +338,9 @@ export function SessionsView({
             <span>Abre o formulario em branco para um novo atendimento.</span>
           </button>
 
-          {filteredEntries.map((entry, index) => (
+          {listLoading && <div className="empty-state">Carregando sessoes...</div>}
+
+          {!listLoading && pageEntries.map((entry, index) => (
             <button
               className={`patient-list-item ${context.entryId === entry.id ? "active" : ""}`}
               key={[
@@ -263,10 +361,32 @@ export function SessionsView({
           ))}
         </div>
 
-        {entries.length > 0 && (
+        <div className="actions-row section-top-space">
+          <button
+            className="btn"
+            disabled={page === 0 || listLoading}
+            type="button"
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+          >
+            Anterior
+          </button>
+          <span className="pill">
+            Pagina {page + 1} de {Math.max(1, Math.ceil(totalEntries / pageSize))}
+          </span>
+          <button
+            className="btn"
+            disabled={(page + 1) * pageSize >= totalEntries || listLoading}
+            type="button"
+            onClick={() => setPage((current) => current + 1)}
+          >
+            Proximo
+          </button>
+        </div>
+
+        {pageEntries.length > 0 && (
           <div className="status-row section-top-space">
             <span className="pill">
-              Ultima sessao: {formatDateTimeBr(entries[0]?.data)}
+              Ultima sessao: {formatDateTimeBr(pageEntries[0]?.data)}
             </span>
           </div>
         )}
@@ -301,6 +421,7 @@ export function SessionsView({
               <span>Paciente</span>
               <div className="input-shell">
                 <input
+                  disabled={detailLoading}
                   list="patient-name-options"
                   placeholder="Selecione ou digite o nome"
                   value={form.nome}
@@ -320,6 +441,7 @@ export function SessionsView({
               <span>Data</span>
               <div className="input-shell">
                 <input
+                  disabled={detailLoading}
                   type="date"
                   value={form.data}
                   onChange={(event) =>
@@ -333,6 +455,7 @@ export function SessionsView({
               <span>Horario</span>
               <div className="input-shell">
                 <input
+                  disabled={detailLoading}
                   type="time"
                   value={form.hora}
                   onChange={(event) =>
@@ -346,6 +469,7 @@ export function SessionsView({
               <span>Tipo</span>
               <div className="select-shell">
                 <select
+                  disabled={detailLoading}
                   value={form.tipo}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, tipo: event.target.value }))
@@ -364,6 +488,7 @@ export function SessionsView({
               <span>Valor da sessao</span>
               <div className="input-shell">
                 <input
+                  disabled={detailLoading}
                   inputMode="decimal"
                   value={form.valorSessao}
                   onChange={(event) =>
@@ -390,6 +515,7 @@ export function SessionsView({
                   aria-checked={isPaid}
                   aria-label={isPaid ? "Sessao marcada como paga" : "Sessao marcada como nao paga"}
                   className={`payment-switch ${isPaid ? "active" : ""}`}
+                  disabled={detailLoading}
                   role="switch"
                   type="button"
                   onClick={() =>
@@ -413,6 +539,7 @@ export function SessionsView({
               <span>Evolucao clinica</span>
               <div className="textarea-shell">
                 <textarea
+                  disabled={detailLoading}
                   value={form.anotacoesClinicas}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -428,6 +555,7 @@ export function SessionsView({
               <span>Observacoes</span>
               <div className="textarea-shell">
                 <textarea
+                  disabled={detailLoading}
                   value={form.obs}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, obs: event.target.value }))
@@ -440,7 +568,7 @@ export function SessionsView({
               <span>Situacao</span>
               <div className="select-shell">
                 <select
-                  disabled={!canSaveSession}
+                  disabled={detailLoading || !canSaveSession}
                   value={form.situacao}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -461,7 +589,7 @@ export function SessionsView({
           <div className="actions-row">
             <button
               className="btn btn-secondary"
-              disabled={busyAction !== null}
+              disabled={detailLoading || busyAction !== null}
               type="submit"
             >
               {busyAction === "schedule"
@@ -474,7 +602,7 @@ export function SessionsView({
             </button>
             <button
               className="btn btn-primary"
-              disabled={busyAction !== null || !canSaveSession}
+              disabled={detailLoading || busyAction !== null || !canSaveSession}
               type="button"
               onClick={() => void handleSave()}
             >
@@ -482,6 +610,7 @@ export function SessionsView({
             </button>
             <button
               className="btn"
+              disabled={detailLoading}
               type="button"
               onClick={() => {
                 setContext({});
@@ -501,4 +630,23 @@ export function SessionsView({
       </div>
     </section>
   );
+}
+
+function parseDateInput(value: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function endOfInputDay(value: string) {
+  const date = parseDateInput(value);
+  if (!date) {
+    return undefined;
+  }
+
+  date.setHours(23, 59, 59, 999);
+  return date;
 }
