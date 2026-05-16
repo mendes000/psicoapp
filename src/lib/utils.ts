@@ -160,6 +160,13 @@ export function parseFlexibleDate(value: unknown) {
     return null;
   }
 
+  const isoDateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnlyMatch) {
+    const [, year, month, day] = isoDateOnlyMatch;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
   const direct = new Date(text);
   if (!Number.isNaN(direct.getTime())) {
     return direct;
@@ -238,6 +245,68 @@ export function calculateAge(value: unknown) {
   }
 
   return String(age);
+}
+
+export function upcomingBirthdays(
+  patients: ConsolidatedPatient[],
+  withinDays = 30,
+): Array<ConsolidatedPatient & { daysUntilBirthday: number; turnsAge: number }> {
+  const today = startOfLocalDay(new Date());
+  const activeSince = startOfLocalDay(new Date(today));
+  activeSince.setMonth(activeSince.getMonth() - 6);
+
+  return patients
+    .filter((patient) => {
+      if (!patient.hasPatientRecord || !patient.ultimaSessaoData) {
+        return false;
+      }
+
+      const lastSessionDate = parseFlexibleDate(patient.ultimaSessaoData);
+      return Boolean(lastSessionDate && startOfLocalDay(lastSessionDate) >= activeSince);
+    })
+    .map((patient) => {
+      const birthDate = parseFlexibleDate(patient.nascimento);
+      if (!birthDate) {
+        return null;
+      }
+
+      let nextBirthday = new Date(
+        today.getFullYear(),
+        birthDate.getMonth(),
+        birthDate.getDate(),
+      );
+
+      if (nextBirthday < today) {
+        nextBirthday = new Date(
+          today.getFullYear() + 1,
+          birthDate.getMonth(),
+          birthDate.getDate(),
+        );
+      }
+
+      const daysUntilBirthday = Math.round(
+        (startOfLocalDay(nextBirthday).getTime() - today.getTime()) / 86_400_000,
+      );
+
+      if (daysUntilBirthday < 0 || daysUntilBirthday > withinDays) {
+        return null;
+      }
+
+      return {
+        ...patient,
+        daysUntilBirthday,
+        turnsAge: nextBirthday.getFullYear() - birthDate.getFullYear(),
+      };
+    })
+    .filter(
+      (
+        patient,
+      ): patient is ConsolidatedPatient & {
+        daysUntilBirthday: number;
+        turnsAge: number;
+      } => patient !== null,
+    )
+    .sort((left, right) => left.daysUntilBirthday - right.daysUntilBirthday);
 }
 
 export function formatCurrency(value: unknown) {
@@ -789,6 +858,12 @@ export function startOfWeek(date: Date) {
 export function addDays(date: Date, days: number) {
   const clone = new Date(date);
   clone.setDate(clone.getDate() + days);
+  return clone;
+}
+
+function startOfLocalDay(date: Date) {
+  const clone = new Date(date);
+  clone.setHours(0, 0, 0, 0);
   return clone;
 }
 

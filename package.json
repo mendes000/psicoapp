@@ -10,6 +10,7 @@
     "dev": "next dev",
     "build": "next build && node scripts/prepare-static-deploy.mjs",
     "start": "next start",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@types/node": "25.6.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^4.1.6"
   }
 }

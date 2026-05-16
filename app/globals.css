@@ -1699,6 +1699,49 @@ body::before,
   border-bottom: 1px solid var(--borda);
 }
 
+.birthday-banner {
+  display: grid;
+  gap: 10px;
+  margin: 12px 10px 0;
+  padding: 12px;
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  background: var(--surface-alt);
+}
+
+.birthday-banner h3 {
+  margin: 0;
+  color: var(--texto);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.birthday-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.birthday-card {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.birthday-card strong {
+  color: var(--texto);
+  font-size: 0.82rem;
+}
+
+.birthday-card span,
+.birthday-card small {
+  color: var(--leve);
+  font-size: 0.72rem;
+}
+
 .lista-title-row {
   display: flex;
   align-items: center;
@@ -2754,6 +2797,10 @@ body::before,
     max-height: 42vh;
     border-right: 0;
     border-bottom: 1px solid var(--borda);
+  }
+
+  .birthday-grid {
+    grid-template-columns: 1fr;
   }
 
   .painel {

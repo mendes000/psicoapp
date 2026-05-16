@@ -3,7 +3,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { loadEntryDetail } from "../lib/data";
-import type { DashboardSnapshot, Entry } from "../lib/types";
+import type { ConsolidatedPatient, DashboardSnapshot, Entry } from "../lib/types";
 import {
   calculateAge,
   formatCurrency,
@@ -12,6 +12,7 @@ import {
   normalizeText,
   parseFlexibleDate,
   toNumber,
+  upcomingBirthdays,
 } from "../lib/utils";
 
 interface DashboardViewProps {
@@ -35,7 +36,7 @@ interface DashboardViewProps {
   onUpdateFinancialEntry: (args: {
     entryId: Entry["id"];
     valorPago: number;
-    obs: string;
+    obs?: string | null;
   }) => Promise<void>;
 }
 
@@ -161,6 +162,8 @@ export function DashboardView({
           )}
         </div>
 
+        <BirthdayBanner patients={activeSnapshot.items} />
+
         <div className="lista-scroll">
           {loading && <div className="sidebar-note">Atualizando...</div>}
           {loadError && <div className="sidebar-note danger">{loadError}</div>}
@@ -212,6 +215,7 @@ export function DashboardView({
             onUpdateFinancialEntry={onUpdateFinancialEntry}
             onUpdatePatientObservation={onUpdatePatientObservation}
             patient={selectedPatient}
+            snapshotFallback={activeSnapshot.fallback === true}
           />
         )}
       </div>
@@ -228,6 +232,7 @@ function PatientPanel({
   onUpdateFinancialEntry,
   onUpdatePatientObservation,
   patient,
+  snapshotFallback,
 }: {
   activeTab: PatientTab;
   entries: Entry[];
@@ -237,7 +242,7 @@ function PatientPanel({
   onUpdateFinancialEntry: (args: {
     entryId: Entry["id"];
     valorPago: number;
-    obs: string;
+    obs?: string | null;
   }) => Promise<void>;
   onUpdatePatientObservation: (args: {
     patientKey: string;
@@ -248,6 +253,7 @@ function PatientPanel({
     observacoes: string;
   }) => Promise<void>;
   patient: DashboardSnapshot["items"][number];
+  snapshotFallback: boolean;
 }) {
   const basePatientEntries = usePatientEntries(entries, patient);
   const [entryDetailsById, setEntryDetailsById] = useState<Record<string, Entry>>({});
@@ -472,6 +478,11 @@ function PatientPanel({
             <div className="fc-v">{missedEntries.length} faltas</div>
           </div>
         </div>
+        {snapshotFallback && (
+          <div className="sidebar-note">
+            Dados parciais: histórico limitado a 12 meses no modo offline
+          </div>
+        )}
 
         <div className="sec-titulo">Sessoes nao pagas e ocorrencias</div>
         <div className="sess-lista">
@@ -483,6 +494,7 @@ function PatientPanel({
                 entry={entry}
                 index={patientEntries.length - index}
                 key={rowKey(patient.key, entry, index)}
+                loadEntryDetail={loadEntryDetail}
                 onUpdateFinancialEntry={onUpdateFinancialEntry}
               />
             ))
@@ -675,14 +687,16 @@ function PatientPanel({
 function FinanceSessionRow({
   entry,
   index,
+  loadEntryDetail,
   onUpdateFinancialEntry,
 }: {
   entry: Entry;
   index: number;
+  loadEntryDetail: (entryId: string) => Promise<Entry>;
   onUpdateFinancialEntry: (args: {
     entryId: Entry["id"];
     valorPago: number;
-    obs: string;
+    obs?: string | null;
   }) => Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
@@ -697,10 +711,19 @@ function FinanceSessionRow({
 
     setSaving(true);
     try {
+      let obs: string | undefined;
+
+      try {
+        const entryDetail = await loadEntryDetail(String(entry.id));
+        obs = String(entryDetail.obs ?? "").trim();
+      } catch {
+        obs = undefined;
+      }
+
       await onUpdateFinancialEntry({
         entryId: entry.id,
         valorPago: toNumber(entry.valor_sessao),
-        obs: String(entry.obs ?? "").trim(),
+        obs,
       });
     } finally {
       setSaving(false);
@@ -873,6 +896,30 @@ function usePatientEntries(entries: Entry[], patient: DashboardSnapshot["items"]
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return `${parts[0]?.[0] ?? "P"}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
+
+function formatBirthdayDate(value: string) {
+  const date = parseFlexibleDate(value);
+  if (!date) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "long",
+  }).format(date);
+}
+
+function birthdayCountdownLabel(daysUntilBirthday: number) {
+  if (daysUntilBirthday === 0) {
+    return "Hoje!";
+  }
+
+  if (daysUntilBirthday === 1) {
+    return "Amanhã";
+  }
+
+  return `Em ${daysUntilBirthday} dias`;
 }
 
 function patientSubtitle(patient: DashboardSnapshot["items"][number]) {
@@ -1058,6 +1105,31 @@ function isEntryDetailLoading(entry: Entry, detailsById: Record<string, Entry>) 
     entryId &&
       entry.anotacoes_clinicas === undefined &&
       !Object.prototype.hasOwnProperty.call(detailsById, entryId),
+  );
+}
+
+function BirthdayBanner({ patients }: { patients: ConsolidatedPatient[] }) {
+  const birthdayPatients = upcomingBirthdays(patients);
+
+  if (birthdayPatients.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="birthday-banner">
+      <h3>🎂 Aniversariantes nos próximos 30 dias</h3>
+      <div className="birthday-grid">
+        {birthdayPatients.map((patient) => (
+          <article className="birthday-card" key={patient.key}>
+            <strong>{patient.nome || "(Sem nome)"}</strong>
+            <span>{formatBirthdayDate(patient.nascimento)}</span>
+            <small>
+              {birthdayCountdownLabel(patient.daysUntilBirthday)} · {patient.turnsAge} anos
+            </small>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
