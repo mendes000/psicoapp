@@ -438,12 +438,18 @@ export async function loadDashboardSnapshot(options?: {
     return data;
   } catch {
     try {
+      console.warn(
+        "Fallback ativo: saldo pode estar incompleto para pacientes com sessões anteriores a 12 meses",
+      );
       const entries = await loadEntries();
-      return buildDashboardSnapshot([], entries, {
-        search,
-        reviewOnly,
-        itemLimit,
-      });
+      return {
+        ...buildDashboardSnapshot([], entries, {
+          search,
+          reviewOnly,
+          itemLimit,
+        }),
+        fallback: true,
+      };
     } catch (fallbackError) {
       if (fallbackError instanceof Error) {
         throw fallbackError;
@@ -714,7 +720,7 @@ export async function saveSessionRecord(
 export async function updateEntryFinancialRecord(args: {
   entryId: IdValue;
   valorPago: number;
-  obs: string;
+  obs?: string | null;
 }) {
   if (!hasIdentifier(args.entryId)) {
     throw new Error("Sessao sem identificador para atualizacao.");
@@ -723,7 +729,7 @@ export async function updateEntryFinancialRecord(args: {
   const supabase = getSupabaseBrowserClient();
   const payload = updatePayload({
     valor_pago: args.valorPago,
-    obs: args.obs,
+    ...(args.obs == null ? {} : { obs: args.obs }),
   });
 
   const { error } = await supabase

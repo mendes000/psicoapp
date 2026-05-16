@@ -47,7 +47,6 @@ import type {
   SessionSeed,
 } from "../lib/types";
 import {
-  buildDashboardSnapshot,
   collectPatientColumns,
   emptySessionForm,
   entryToSessionForm,
@@ -886,7 +885,7 @@ export function PsicoApp() {
   async function handleUpdateEntryFinancial(args: {
     entryId: Entry["id"];
     valorPago: number;
-    obs: string;
+    obs?: string | null;
   }) {
     try {
       await updateEntryFinancialRecord(args);
@@ -896,22 +895,20 @@ export function PsicoApp() {
           ? {
               ...entry,
               valor_pago: args.valorPago,
-              obs: args.obs,
+              ...(args.obs == null ? {} : { obs: args.obs }),
             }
           : entry,
       );
 
-      const nextDashboardSnapshot = buildDashboardSnapshot(patients, nextEntries);
-
       startTransition(() => {
         setEntries(nextEntries);
-        setDashboardSnapshot(nextDashboardSnapshot);
       });
 
       if (loadedUserIdRef.current) {
         persistDatasetCache(loadedUserIdRef.current, "entries", nextEntries);
-        persistCacheValue(loadedUserIdRef.current, "dashboard", nextDashboardSnapshot);
       }
+
+      await refreshDashboard();
     } catch (error) {
       setFlash({
         type: "error",

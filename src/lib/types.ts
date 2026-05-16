@@ -103,6 +103,7 @@ export interface DashboardSnapshot {
   reviewCount: number;
   totalCount: number;
   limited: boolean;
+  fallback?: boolean;
   items: ConsolidatedPatient[];
 }
 
